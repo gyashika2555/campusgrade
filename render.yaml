@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: campusgrade-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SEED_PASSWORD
+        sync: false
+      - key: CLIENT_URL
+        value: https://campusgrade-ai.hellopraveen51.chatgpt.site

@@ -1,0 +1,33 @@
+name: CampusGrade CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Type-check frontend
+        run: pnpm exec tsc --noEmit
+      - name: Build frontend
+        run: pnpm build
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+      - name: Check backend syntax
+        run: find server/src -name '*.js' -print0 | xargs -0 -n1 node --check

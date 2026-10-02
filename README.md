@@ -130,6 +130,7 @@ NEXT_PUBLIC_API_URL=https://YOUR-RENDER-SERVICE.onrender.com/api
 
 - `.env` files are excluded from Git.
 - Passwords are hashed with bcrypt.
+- New accounts receive a randomly generated temporary password when the administrator does not provide one.
 - JWT authorization protects role-specific routes.
 - AI output remains a suggested evaluation until a professor releases the score.
 - Submitted student answers are versioned and read-only after submission.
