@@ -78,13 +78,13 @@ npm run dev
 
 API URL: `http://localhost:5000/api`
 
-The seed script creates these demonstration accounts with password `Campus123!`:
+Before seeding, set a private `SEED_PASSWORD` of at least 12 characters in `server/.env`. The seed script creates these demonstration accounts using that password:
 
 - Admin: `admin@campusgrade.edu`
 - Professor: `professor@campusgrade.edu`
 - Student: `student@campusgrade.edu`
 
-Change all demonstration passwords before using the application outside a classroom demo.
+Keep the seed password out of GitHub and change all demonstration passwords before using the application outside a classroom demo.
 
 ## Deploy the API to Render
 
@@ -94,7 +94,7 @@ This repository includes `render.yaml` for a free Render web service.
 2. In Atlas Network Access, permit connections from the deployment environment.
 3. In Render, select **New → Blueprint** and connect this repository.
 4. Render reads `render.yaml` and creates `campusgrade-api`.
-5. When prompted, enter `MONGODB_URI`. Never commit it to GitHub.
+5. When prompted, enter `MONGODB_URI` and a private `SEED_PASSWORD`. Never commit either value to GitHub.
 6. Optionally add `LLM_API_URL`, `LLM_API_KEY`, and `LLM_MODEL` in Render.
 7. Run `npm run seed` once from the Render Shell to create demo records.
 
