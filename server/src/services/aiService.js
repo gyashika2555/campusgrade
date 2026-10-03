@@ -34,10 +34,10 @@ export async function generateAssignment({ topic, outcomes, difficulty, totalPoi
   };
 }
 
-export async function evaluateSubmission({ assignment, submission }) {
+export async function evaluateSubmission({ assignment, submission, comparisons = [] }) {
   const evaluated = await callLlm(
     "You assist, but never replace, a faculty grader. Evaluate only against the supplied questions and rubric. Return strict JSON with suggestedGrade, plagiarismLevel, summary, scores, and plagiarismEvidence. Return one scores item per assignment question containing questionId, criterion, score, maxPoints, and a specific note explaining deductions and the scoring conclusion. Each plagiarismEvidence item must contain source, location, similarity, studentExcerpt, matchedExcerpt, and explanation. Only report plagiarism evidence supported by the supplied comparison data; never invent a source or match.",
-    JSON.stringify({ assignment, submission }),
+    JSON.stringify({ assignment, submission, comparisonSubmissions: comparisons }),
   );
   return evaluated ?? { suggestedGrade: 0, plagiarismLevel: 0, summary: "AI evaluation is awaiting external service configuration.", scores: [], plagiarismEvidence: [] };
 }

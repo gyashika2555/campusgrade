@@ -1,5 +1,5 @@
-import { CampusGradeApp } from "./campusgrade-app";
+import { CampusGradeAuth } from "./campusgrade-auth";
 
 export default function Home() {
-  return <CampusGradeApp />;
+  return <CampusGradeAuth />;
 }

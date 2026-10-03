@@ -52,6 +52,18 @@ flowchart LR
   Review --> DB
 ```
 
+## MongoDB collections
+
+| Collection | Source-of-truth records |
+| --- | --- |
+| `users` | Admin, professor, and student accounts, roles, departments, and password hashes |
+| `courses` | Course details, assigned professor, and enrolled student references |
+| `assignments` | Questions, points, deadlines, AI settings, and plagiarism threshold |
+| `submissions` | Student answers, attempts, AI evaluation, plagiarism score/evidence, final grade, and faculty feedback |
+| `notifications` | Per-user assignment, submission, and released-score alerts |
+
+The frontend contains no sample academic records or fixed dashboard totals. It loads records through the authenticated API and derives each dashboard value from the returned MongoDB data.
+
 ## Local development
 
 Prerequisites: Node.js 22+, pnpm, and MongoDB Atlas or local MongoDB.
@@ -72,19 +84,12 @@ Frontend URL: `http://localhost:3000`
 cd server
 cp .env.example .env
 npm install
-npm run seed
 npm run dev
 ```
 
 API URL: `http://localhost:5000/api`
 
-Before seeding, set a private `SEED_PASSWORD` of at least 12 characters in `server/.env`. The seed script creates these demonstration accounts using that password:
-
-- Admin: `admin@campusgrade.edu`
-- Professor: `professor@campusgrade.edu`
-- Student: `student@campusgrade.edu`
-
-Keep the seed password out of GitHub and change all demonstration passwords before using the application outside a classroom demo.
+Start the frontend, open `http://localhost:3000`, and complete the one-time **Create the first administrator** screen. The setup endpoint works only while the users collection is empty. Afterward, sign in with that administrator and create professor and student accounts from the People screen.
 
 ## Deploy the API to Render
 
@@ -94,9 +99,9 @@ This repository includes `render.yaml` for a free Render web service.
 2. In Atlas Network Access, permit connections from the deployment environment.
 3. In Render, select **New → Blueprint** and connect this repository.
 4. Render reads `render.yaml` and creates `campusgrade-api`.
-5. When prompted, enter `MONGODB_URI` and a private `SEED_PASSWORD`. Never commit either value to GitHub.
+5. When prompted, enter `MONGODB_URI`. Render generates `JWT_SECRET`; never commit either value to GitHub.
 6. Optionally add `LLM_API_URL`, `LLM_API_KEY`, and `LLM_MODEL` in Render.
-7. Run `npm run seed` once from the Render Shell to create demo records.
+7. Open the deployed frontend and complete the one-time administrator setup.
 
 Render generates `JWT_SECRET` automatically. The health endpoint is:
 
@@ -114,7 +119,10 @@ NEXT_PUBLIC_API_URL=https://YOUR-RENDER-SERVICE.onrender.com/api
 
 | Method | Route | Access |
 | --- | --- | --- |
+| GET | `/api/auth/setup-status` | Public; returns whether first-time setup is required |
+| POST | `/api/auth/setup` | Public only while no users exist |
 | POST | `/api/auth/login` | Public |
+| GET | `/api/auth/me` | Authenticated user |
 | GET/POST | `/api/users` | Admin |
 | PATCH/DELETE | `/api/users/:id` | Admin |
 | GET/POST/PATCH/DELETE | `/api/courses/:courseId/students` | Admin or professor |
@@ -131,6 +139,7 @@ NEXT_PUBLIC_API_URL=https://YOUR-RENDER-SERVICE.onrender.com/api
 - `.env` files are excluded from Git.
 - Passwords are hashed with bcrypt.
 - New accounts receive a randomly generated temporary password when the administrator does not provide one.
+- The first-administrator setup endpoint permanently closes after the first user is created.
 - JWT authorization protects role-specific routes.
 - AI output remains a suggested evaluation until a professor releases the score.
 - Submitted student answers are versioned and read-only after submission.

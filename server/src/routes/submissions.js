@@ -7,8 +7,15 @@ import Submission from "../models/Submission.js";
 import { evaluateSubmission } from "../services/aiService.js";
 
 const router = Router();
-router.get("/mine", allowRoles("student"), async (req, res, next) => { try { res.json(await Submission.find({ student: req.user.id }).populate("assignment", "assignmentCode title dueAt totalPoints").sort({ submittedAt: -1 })); } catch (error) { next(error); } });
-router.get("/assignment/:assignmentId", allowRoles("admin", "professor"), async (req, res, next) => { try { res.json(await Submission.find({ assignment: req.params.assignmentId }).populate("student", "campusId name email").sort({ submittedAt: -1 })); } catch (error) { next(error); } });
+router.get("/mine", allowRoles("student"), async (req, res, next) => { try { res.json(await Submission.find({ student: req.user.id }).populate("assignment", "assignmentCode title dueAt totalPoints questions course").sort({ submittedAt: -1 })); } catch (error) { next(error); } });
+router.get("/assignment/:assignmentId", allowRoles("admin", "professor"), async (req, res, next) => {
+  try {
+    const assignment = await Assignment.findById(req.params.assignmentId).populate("course", "professor");
+    if (!assignment) return res.status(404).json({ message: "Assignment not found" });
+    if (req.user.role === "professor" && String(assignment.course.professor) !== req.user.id) return res.status(403).json({ message: "This assignment belongs to another professor" });
+    res.json(await Submission.find({ assignment: assignment.id }).populate("student", "campusId name email department").sort({ submittedAt: -1 }));
+  } catch (error) { next(error); }
+});
 router.post("/", allowRoles("student"), async (req, res, next) => {
   try {
     const assignment = await Assignment.findOne({ _id: req.body.assignmentId, status: "published" });
@@ -16,7 +23,11 @@ router.post("/", allowRoles("student"), async (req, res, next) => {
     const lastAttempt = await Submission.findOne({ assignment: assignment.id, student: req.user.id }).sort({ attemptNumber: -1 });
     const submission = await Submission.create({ assignment: assignment.id, student: req.user.id, answers: req.body.answers, note: req.body.note, attemptNumber: (lastAttempt?.attemptNumber ?? 0) + 1 });
     if (assignment.aiEvaluationEnabled) {
-      const evaluation = await evaluateSubmission({ assignment, submission: { answers: submission.answers } });
+      const comparisonSubmissions = assignment.plagiarismCheckEnabled
+        ? await Submission.find({ assignment: assignment.id, _id: { $ne: submission.id }, student: { $ne: req.user.id } }).populate("student", "campusId").select("answers student attemptNumber").limit(25)
+        : [];
+      const comparisons = comparisonSubmissions.map((item) => ({ source: `Course submission · ${item.student?.campusId ?? "another student"}`, attemptNumber: item.attemptNumber, answers: item.answers }));
+      const evaluation = await evaluateSubmission({ assignment, submission: { answers: submission.answers }, comparisons });
       if (!assignment.plagiarismCheckEnabled) {
         delete evaluation.plagiarismLevel;
         delete evaluation.plagiarismEvidence;
@@ -44,7 +55,15 @@ router.post("/:id/ai-evaluate", allowRoles("admin", "professor"), async (req, re
   try {
     const submission = await Submission.findById(req.params.id).populate("assignment");
     if (!submission) return res.status(404).json({ message: "Submission not found" });
-    const evaluation = await evaluateSubmission({ assignment: submission.assignment, submission: { answers: submission.answers } });
+    if (req.user.role === "professor") {
+      const course = await Course.findOne({ _id: submission.assignment.course, professor: req.user.id });
+      if (!course) return res.status(403).json({ message: "This submission belongs to another professor" });
+    }
+    const comparisonSubmissions = submission.assignment.plagiarismCheckEnabled
+      ? await Submission.find({ assignment: submission.assignment.id, _id: { $ne: submission.id }, student: { $ne: submission.student } }).populate("student", "campusId").select("answers student attemptNumber").limit(25)
+      : [];
+    const comparisons = comparisonSubmissions.map((item) => ({ source: `Course submission · ${item.student?.campusId ?? "another student"}`, attemptNumber: item.attemptNumber, answers: item.answers }));
+    const evaluation = await evaluateSubmission({ assignment: submission.assignment, submission: { answers: submission.answers }, comparisons });
     if (!submission.assignment.plagiarismCheckEnabled) {
       delete evaluation.plagiarismLevel;
       delete evaluation.plagiarismEvidence;
@@ -58,8 +77,12 @@ router.post("/:id/ai-evaluate", allowRoles("admin", "professor"), async (req, re
 
 router.patch("/:id/finalize", allowRoles("admin", "professor"), async (req, res, next) => {
   try {
-    const submission = await Submission.findById(req.params.id).populate("assignment", "title assignmentCode");
+    const submission = await Submission.findById(req.params.id).populate("assignment", "title assignmentCode course");
     if (!submission) return res.status(404).json({ message: "Submission not found" });
+    if (req.user.role === "professor") {
+      const course = await Course.findOne({ _id: submission.assignment.course, professor: req.user.id });
+      if (!course) return res.status(403).json({ message: "This submission belongs to another professor" });
+    }
     submission.finalGrade = req.body.finalGrade;
     submission.facultyFeedback = req.body.facultyFeedback;
     submission.finalizedBy = req.user.id;
@@ -81,8 +104,12 @@ router.patch("/:id/finalize", allowRoles("admin", "professor"), async (req, res,
 
 router.patch("/assignment/:assignmentId/finalize-all", allowRoles("admin", "professor"), async (req, res, next) => {
   try {
-    const assignment = await Assignment.findById(req.params.assignmentId).select("title");
+    const assignment = await Assignment.findById(req.params.assignmentId).select("title course");
     if (!assignment) return res.status(404).json({ message: "Assignment not found" });
+    if (req.user.role === "professor") {
+      const course = await Course.findOne({ _id: assignment.course, professor: req.user.id });
+      if (!course) return res.status(403).json({ message: "This assignment belongs to another professor" });
+    }
     const submissions = await Submission.find({ assignment: assignment.id, status: "ai_reviewed" }).select("student");
     const releasedAt = new Date();
     const result = await Submission.updateMany(

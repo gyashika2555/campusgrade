@@ -17,7 +17,5 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
-      - key: SEED_PASSWORD
-        sync: false
       - key: CLIENT_URL
         value: https://campusgrade-ai.hellopraveen51.chatgpt.site
