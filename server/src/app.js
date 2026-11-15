@@ -6,6 +6,7 @@ import morgan from "morgan";
 import { ZodError } from "zod";
 import { connectDatabase } from "./config/db.js";
 import { authenticate } from "./middleware/auth.js";
+import analyticsRoutes from "./routes/analytics.js";
 import assignmentRoutes from "./routes/assignments.js";
 import authRoutes from "./routes/auth.js";
 import courseRoutes from "./routes/courses.js";
@@ -25,6 +26,7 @@ app.use("/api/courses", authenticate, courseRoutes);
 app.use("/api/assignments", authenticate, assignmentRoutes);
 app.use("/api/submissions", authenticate, submissionRoutes);
 app.use("/api/notifications", authenticate, notificationRoutes);
+app.use("/api/analytics", authenticate, analyticsRoutes);
 app.use((error, _req, res, _next) => {
   void _next;
   if (error instanceof ZodError) return res.status(400).json({ message: "Validation failed", issues: error.issues });

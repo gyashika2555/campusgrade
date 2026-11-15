@@ -7,6 +7,12 @@ export type ApiQuestion = { _id: string; prompt: string; type: "text" | "code"; 
 export type ApiAssignment = { _id: string; assignmentCode: string; course: ApiCourse | Pick<ApiCourse, "_id" | "code" | "title" | "term">; title: string; description: string; learningOutcomes: string[]; difficulty: "beginner" | "intermediate" | "advanced"; rubric: Array<{ criterion: string; description?: string; maxPoints: number }>; questions: ApiQuestion[]; totalPoints: number; dueAt: string; status: "draft" | "published" | "closed"; aiGenerated: boolean; aiEvaluationEnabled: boolean; plagiarismCheckEnabled: boolean; plagiarismThreshold: 10 | 20 | 30 | 40 | 50 };
 export type ApiSubmission = { _id: string; assignment: ApiAssignment | string; student?: ApiUser; answers: Array<{ question: string; type: "text" | "code"; answer: string }>; attemptNumber: number; note?: string; status: "submitted" | "ai_reviewed" | "graded" | "returned"; aiEvaluation?: { suggestedGrade?: number; summary?: string; scores?: Array<{ questionId?: string; criterion?: string; score?: number; maxPoints?: number; note?: string }>; plagiarismLevel?: number; plagiarismEvidence?: Array<{ source?: string; location?: string; similarity?: number; studentExcerpt?: string; matchedExcerpt?: string; explanation?: string }> }; finalGrade?: number; facultyFeedback?: string; scoreReleasedAt?: string; submittedAt: string };
 export type ApiNotification = { _id: string; type: "assignment_published" | "submission_received" | "score_released" | "system"; title: string; message: string; assignment?: ApiAssignment; submission?: ApiSubmission; readAt?: string; createdAt: string };
+export type ApiAdminAnalytics = {
+  summary: { professors: number; students: number; subjects: number; assignments: number; submissions: number; averageScore: number; submissionRate: number };
+  professors: Array<{ id: string; campusId?: string; name: string; department?: string; courses: number; assignmentsCreated: number; studentsTaught: number; submissionsReceived: number; averageScore: number; submissionRate: number; subjectAverages: Array<{ courseId: string; code: string; title: string; averageScore: number; submissionRate: number }>; improvement: string }>;
+  students: Array<{ id: string; campusId?: string; name: string; department?: string; subjects: number; assignmentsAvailable: number; assignmentsSubmitted: number; pendingAssignments: number; averageScore: number; submissionRate: number; strongestSubject: string; needsFocus: string }>;
+  subjects: Array<{ id: string; code: string; title: string; term: string; professor: string; enrolledStudents: number; assignments: number; submissions: number; averageScore: number; submissionRate: number }>;
+};
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -48,6 +54,7 @@ export const campusGradeApi = {
   finalizeSubmission: (token: string, id: string, input: { finalGrade: number; facultyFeedback: string }) => request<ApiSubmission>(`/submissions/${id}/finalize`, { method: "PATCH", body: JSON.stringify(input) }, token),
   finalizeAllSubmissions: (token: string, assignmentId: string) => request<{ released: number }>(`/submissions/assignment/${assignmentId}/finalize-all`, { method: "PATCH" }, token),
   listNotifications: (token: string) => request<ApiNotification[]>("/notifications", {}, token),
+  adminAnalytics: (token: string) => request<ApiAdminAnalytics>("/analytics/admin", {}, token),
   markNotificationRead: (token: string, id: string) => request(`/notifications/${id}/read`, { method: "PATCH" }, token),
   markAllNotificationsRead: (token: string) => request("/notifications/read-all", { method: "PATCH" }, token),
 };

@@ -2,7 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Bell, BookOpen, CheckCircle2, ClipboardCheck, GraduationCap, LayoutDashboard,
+  BarChart3, Bell, BookOpen, CheckCircle2, ClipboardCheck, GraduationCap, LayoutDashboard,
+  Lightbulb, Target, TrendingUp,
   LoaderCircle, LogOut, Menu, Plus, RefreshCw, Search, ShieldCheck, Sparkles,
   Trash2, UploadCloud, UserRoundPlus, Users, X,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import {
   campusGradeApi,
+  type ApiAdminAnalytics,
   type ApiAssignment,
   type ApiCourse,
   type ApiNotification,
@@ -37,27 +39,47 @@ type GeneratedAssignment = {
 };
 
 const navByRole: Record<Role, string[]> = {
-  admin: ["Overview", "People", "Courses"],
+  admin: ["Overview", "People", "Courses", "Analytics"],
   professor: ["Overview", "Assignments", "Class roster"],
   student: ["Overview", "My homework", "Submissions"],
 };
 
-const iconBySection = { Overview: LayoutDashboard, People: Users, Courses: BookOpen, Assignments: ClipboardCheck, "Class roster": Users, "My homework": BookOpen, Submissions: UploadCloud };
+const iconBySection = { Overview: LayoutDashboard, People: Users, Courses: BookOpen, Analytics: BarChart3, Assignments: ClipboardCheck, "Class roster": Users, "My homework": BookOpen, Submissions: UploadCloud };
 const idOf = (record: { _id?: string; id?: string }) => record._id ?? record.id ?? "";
 const courseName = (course: ApiAssignment["course"]) => `${course.code} · ${course.title}`;
 const formatDate = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
 const initials = (name: string) => name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 
 const previewProfessor: ApiUser = { _id: "preview-professor", campusId: "P10421", name: "Dr. Maya Chen", email: "maya.chen@campusgrade.edu", role: "professor", department: "Computer Science", active: true };
+const previewProfessorTwo: ApiUser = { _id: "preview-professor-2", campusId: "P10422", name: "Prof. Daniel Kim", email: "daniel.kim@campusgrade.edu", role: "professor", department: "Information Systems", active: true };
 const previewStudent: ApiUser = { _id: "preview-student", campusId: "S20845", name: "Jordan Lee", email: "jordan.lee@campusgrade.edu", role: "student", department: "Computer Science", active: true };
 const previewUsers: ApiUser[] = [
   previewProfessor,
+  previewProfessorTwo,
   previewStudent,
   { _id: "preview-student-2", campusId: "S20846", name: "Priya Shah", email: "priya.shah@campusgrade.edu", role: "student", department: "Information Systems", active: true },
+  { _id: "preview-student-3", campusId: "S20847", name: "Alex Rivera", email: "alex.rivera@campusgrade.edu", role: "student", department: "Computer Science", active: true },
 ];
 const previewCourses: ApiCourse[] = [
   { _id: "preview-course", code: "CS412", title: "Software Quality Engineering", term: "Fall 2026", professor: previewProfessor, students: previewUsers.filter((user) => user.role === "student"), createdAt: "2026-09-01T12:00:00.000Z" },
+  { _id: "preview-course-2", code: "IS330", title: "Database Systems", term: "Fall 2026", professor: previewProfessorTwo, students: previewUsers.filter((user) => ["preview-student", "preview-student-2"].includes(idOf(user))), createdAt: "2026-09-01T12:00:00.000Z" },
 ];
+const previewAnalytics: ApiAdminAnalytics = {
+  summary: { professors: 2, students: 3, subjects: 2, assignments: 9, submissions: 24, averageScore: 82.4, submissionRate: 88.9 },
+  professors: [
+    { id: "preview-professor", campusId: "P10421", name: "Dr. Maya Chen", department: "Computer Science", courses: 1, assignmentsCreated: 5, studentsTaught: 3, submissionsReceived: 14, averageScore: 86, submissionRate: 93.3, subjectAverages: [{ courseId: "preview-course", code: "CS412", title: "Software Quality Engineering", averageScore: 86, submissionRate: 93.3 }], improvement: "Student outcomes are strong. Add one advanced code-review challenge and continue the current feedback approach." },
+    { id: "preview-professor-2", campusId: "P10422", name: "Prof. Daniel Kim", department: "Information Systems", courses: 1, assignmentsCreated: 4, studentsTaught: 2, submissionsReceived: 10, averageScore: 78, submissionRate: 83.3, subjectAverages: [{ courseId: "preview-course-2", code: "IS330", title: "Database Systems", averageScore: 78, submissionRate: 83.3 }], improvement: "Add targeted practice on database normalization and provide question-level feedback before the next assignment." },
+  ],
+  students: [
+    { id: "preview-student", campusId: "S20845", name: "Jordan Lee", department: "Computer Science", subjects: 2, assignmentsAvailable: 9, assignmentsSubmitted: 9, pendingAssignments: 0, averageScore: 88, submissionRate: 100, strongestSubject: "Software Quality Engineering", needsFocus: "Database Systems" },
+    { id: "preview-student-2", campusId: "S20846", name: "Priya Shah", department: "Information Systems", subjects: 2, assignmentsAvailable: 9, assignmentsSubmitted: 8, pendingAssignments: 1, averageScore: 81, submissionRate: 88.9, strongestSubject: "Database Systems", needsFocus: "Software Quality Engineering" },
+    { id: "preview-student-3", campusId: "S20847", name: "Alex Rivera", department: "Computer Science", subjects: 1, assignmentsAvailable: 5, assignmentsSubmitted: 4, pendingAssignments: 1, averageScore: 74, submissionRate: 80, strongestSubject: "Software Quality Engineering", needsFocus: "Software Quality Engineering" },
+  ],
+  subjects: [
+    { id: "preview-course", code: "CS412", title: "Software Quality Engineering", term: "Fall 2026", professor: "Dr. Maya Chen", enrolledStudents: 3, assignments: 5, submissions: 14, averageScore: 86, submissionRate: 93.3 },
+    { id: "preview-course-2", code: "IS330", title: "Database Systems", term: "Fall 2026", professor: "Prof. Daniel Kim", enrolledStudents: 2, assignments: 4, submissions: 10, averageScore: 78, submissionRate: 83.3 },
+  ],
+};
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="rounded-2xl border border-dashed bg-white p-10 text-center"><BookOpen className="mx-auto size-7 text-[#98a3b4]" /><p className="mt-3 font-bold text-[#1b2b4b]">{title}</p><p className="mt-1 text-sm text-[#718096]">{detail}</p></div>;
@@ -79,6 +101,7 @@ export function CampusGradeApp({ session, onLogout, previewMode = false }: { ses
   const [assignments, setAssignments] = useState<ApiAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ApiSubmission[]>([]);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [analytics, setAnalytics] = useState<ApiAdminAnalytics | null>(previewMode ? previewAnalytics : null);
   const [notificationOpen, setNotificationOpen] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -89,7 +112,10 @@ export function CampusGradeApp({ session, onLogout, previewMode = false }: { ses
         campusGradeApi.listCourses(token), campusGradeApi.listAssignments(token), campusGradeApi.listNotifications(token),
       ]);
       setCourses(courseData); setAssignments(assignmentData); setNotifications(notificationData);
-      if (role === "admin") setUsers(await campusGradeApi.listUsers(token));
+      if (role === "admin") {
+        const [userData, analyticsData] = await Promise.all([campusGradeApi.listUsers(token), campusGradeApi.adminAnalytics(token)]);
+        setUsers(userData); setAnalytics(analyticsData);
+      }
       if (role === "student") setSubmissions(await campusGradeApi.mySubmissions(token));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "CampusGrade data could not be loaded");
@@ -128,7 +154,7 @@ export function CampusGradeApp({ session, onLogout, previewMode = false }: { ses
       <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur sm:px-7 lg:px-9"><div className="flex items-center gap-3"><Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setMobileNav(true)}><Menu /></Button><div><p className="text-lg font-extrabold">{section}</p><p className="hidden text-xs text-[#78849a] sm:block">{session.user.department ?? "CampusGrade"}</p></div></div><div className="flex items-center gap-2">{previewMode && <Badge variant="outline" className="hidden sm:inline-flex">Preview mode</Badge>}<Button size="icon" variant="outline" className="relative rounded-full" onClick={() => setNotificationOpen(true)}><Bell />{unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-[#ea5a63] px-1 text-[10px] font-bold text-white">{unreadCount}</span>}</Button>{!previewMode && <Button size="sm" variant="ghost" onClick={onLogout}><LogOut />Sign out</Button>}</div></header>
       <main className="mx-auto max-w-[1450px] px-4 py-7 sm:px-7 lg:px-9 lg:py-9">
         {error && <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-[#f2c2bf] bg-[#fff2f1] p-4 text-sm font-semibold text-[#a8322d]"><span>{error}</span><Button size="sm" variant="outline" onClick={() => void loadData()}><RefreshCw />Retry</Button></div>}
-        {role === "admin" && <AdminPortal section={section} users={users} courses={courses} token={token} reload={loadData} previewMode={previewMode} />}
+        {role === "admin" && <AdminPortal section={section} users={users} courses={courses} analytics={analytics} token={token} reload={loadData} previewMode={previewMode} />}
         {role === "professor" && <ProfessorPortal section={section} courses={courses} assignments={assignments} notifications={notifications} token={token} reload={loadData} />}
         {role === "student" && <StudentPortal section={section} courses={courses} assignments={assignments} submissions={submissions} latestSubmission={latestSubmission} token={token} reload={loadData} />}
       </main>
@@ -137,7 +163,28 @@ export function CampusGradeApp({ session, onLogout, previewMode = false }: { ses
   </div>;
 }
 
-function AdminPortal({ section, users, courses, token, reload, previewMode }: { section: string; users: ApiUser[]; courses: ApiCourse[]; token: string; reload: () => Promise<void>; previewMode: boolean }) {
+function MetricBar({ label, value, color = "bg-[#315fe3]" }: { label: string; value: number; color?: string }) {
+  const width = Math.max(0, Math.min(value, 100));
+  return <div><div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-[#657187]"><span>{label}</span><span>{roundedDisplay(value)}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[#e8edf5]"><div className={`h-full rounded-full ${color}`} style={{ width: `${width}%` }} /></div></div>;
+}
+
+const roundedDisplay = (value: number) => Number.isInteger(value) ? value : value.toFixed(1);
+
+function AdminAnalytics({ analytics }: { analytics: ApiAdminAnalytics | null }) {
+  if (!analytics) return <EmptyState title="Analytics are loading" detail="Campus performance data will appear here." />;
+  return <div className="space-y-7">
+    <div><p className="text-sm font-bold text-[#315fe3]">Administrator analytics</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em]">Academic performance insights</h1><p className="mt-2 max-w-3xl text-[#69758a]">Monitor professor activity, student progress, and results by subject. Scores are normalized as percentages for fair comparison.</p></div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard icon={ClipboardCheck} label="Assignments created" value={analytics.summary.assignments} /><StatCard icon={UploadCloud} label="Student submissions" value={analytics.summary.submissions} /><StatCard icon={TrendingUp} label="Overall average" value={`${roundedDisplay(analytics.summary.averageScore)}%`} /><StatCard icon={Target} label="Submission rate" value={`${roundedDisplay(analytics.summary.submissionRate)}%`} /></div>
+    <Tabs defaultValue="professors" className="space-y-5">
+      <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-xl bg-[#e8edf7] p-1 sm:w-fit sm:grid-cols-3"><TabsTrigger value="professors">Professor analytics</TabsTrigger><TabsTrigger value="students">Student analytics</TabsTrigger><TabsTrigger value="subjects">Subject analytics</TabsTrigger></TabsList>
+      <TabsContent value="professors" className="space-y-4">{analytics.professors.length ? analytics.professors.map((professor) => <article key={professor.id} className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)] sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-extrabold">{professor.name}</h2><Badge variant="outline" className="font-mono">{professor.campusId}</Badge></div><p className="mt-1 text-sm text-[#758197]">{professor.department} · {professor.courses} {professor.courses === 1 ? "subject" : "subjects"}</p></div><Badge className="bg-[#e8f7f1] text-[#16745e] hover:bg-[#e8f7f1]">Class average {roundedDisplay(professor.averageScore)}%</Badge></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-[#f6f8fc] p-4"><p className="text-xs font-bold uppercase tracking-wide text-[#7a869a]">Assignments created</p><p className="mt-1 text-2xl font-extrabold">{professor.assignmentsCreated}</p></div><div className="rounded-xl bg-[#f6f8fc] p-4"><p className="text-xs font-bold uppercase tracking-wide text-[#7a869a]">Students taught</p><p className="mt-1 text-2xl font-extrabold">{professor.studentsTaught}</p></div><div className="rounded-xl bg-[#f6f8fc] p-4"><p className="text-xs font-bold uppercase tracking-wide text-[#7a869a]">Submissions received</p><p className="mt-1 text-2xl font-extrabold">{professor.submissionsReceived}</p></div></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]"> <div className="rounded-xl border p-4"><h3 className="font-extrabold">Average marks by subject</h3><div className="mt-4 grid gap-4">{professor.subjectAverages.length ? professor.subjectAverages.map((subject) => <div key={subject.courseId}><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-bold">{subject.code} · {subject.title}</span><span className="text-sm font-extrabold text-[#315fe3]">{roundedDisplay(subject.averageScore)}%</span></div><MetricBar label="Submission rate" value={subject.submissionRate} color="bg-[#36a785]" /></div>) : <p className="text-sm text-[#758197]">No graded subject data yet.</p>}</div></div><div className="rounded-xl border border-[#d9e2ff] bg-[#f5f7ff] p-4"><div className="flex items-center gap-2 text-[#315fe3]"><Lightbulb className="size-5" /><h3 className="font-extrabold">What to improve</h3></div><p className="mt-3 text-sm leading-6 text-[#55627a]">{professor.improvement}</p><div className="mt-4"><MetricBar label="Overall submission rate" value={professor.submissionRate} /></div></div></div></article>) : <EmptyState title="No professor analytics" detail="Professor performance will appear after courses and assignments are created." />}</TabsContent>
+      <TabsContent value="students"><section className="overflow-hidden rounded-2xl border bg-white"><div className="border-b p-5"><h2 className="text-lg font-extrabold">Individual student progress</h2><p className="mt-1 text-sm text-[#758197]">Submitted assignments, pending work, average scores, and subject-level focus areas.</p></div><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Student</TableHead><TableHead>Submitted</TableHead><TableHead>Pending</TableHead><TableHead>Average</TableHead><TableHead>Completion</TableHead><TableHead>Strongest subject</TableHead><TableHead>Needs focus</TableHead></TableRow></TableHeader><TableBody>{analytics.students.map((student) => <TableRow key={student.id}><TableCell><p className="font-bold">{student.name}</p><p className="text-xs text-[#78849a]">{student.campusId} · {student.department}</p></TableCell><TableCell className="font-semibold">{student.assignmentsSubmitted}/{student.assignmentsAvailable}</TableCell><TableCell><Badge variant={student.pendingAssignments ? "outline" : "default"}>{student.pendingAssignments}</Badge></TableCell><TableCell className="font-extrabold text-[#315fe3]">{roundedDisplay(student.averageScore)}%</TableCell><TableCell className="min-w-40"><MetricBar label="" value={student.submissionRate} color="bg-[#36a785]" /></TableCell><TableCell className="max-w-48 text-sm">{student.strongestSubject}</TableCell><TableCell className="max-w-48 text-sm">{student.needsFocus}</TableCell></TableRow>)}</TableBody></Table></div></section></TabsContent>
+      <TabsContent value="subjects"><div className="grid gap-4 lg:grid-cols-2">{analytics.subjects.map((subject) => <article key={subject.id} className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)]"><div className="flex items-start justify-between gap-4"><div><Badge variant="outline">{subject.code}</Badge><h2 className="mt-3 text-lg font-extrabold">{subject.title}</h2><p className="mt-1 text-sm text-[#758197]">{subject.term} · {subject.professor}</p></div><div className="rounded-xl bg-[#e9efff] px-3 py-2 text-center"><p className="text-[10px] font-bold uppercase text-[#6074aa]">Average</p><p className="text-xl font-extrabold text-[#315fe3]">{roundedDisplay(subject.averageScore)}%</p></div></div><div className="mt-5 grid grid-cols-3 gap-3 text-center"><div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-xl font-extrabold">{subject.assignments}</p><p className="text-xs text-[#758197]">Assignments</p></div><div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-xl font-extrabold">{subject.enrolledStudents}</p><p className="text-xs text-[#758197]">Students</p></div><div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-xl font-extrabold">{subject.submissions}</p><p className="text-xs text-[#758197]">Submissions</p></div></div><div className="mt-5"><MetricBar label="Submission rate" value={subject.submissionRate} color="bg-[#36a785]" /></div></article>)}</div></TabsContent>
+    </Tabs>
+  </div>;
+}
+
+function AdminPortal({ section, users, courses, analytics, token, reload, previewMode }: { section: string; users: ApiUser[]; courses: ApiCourse[]; analytics: ApiAdminAnalytics | null; token: string; reload: () => Promise<void>; previewMode: boolean }) {
   const [userOpen, setUserOpen] = useState(false);
   const [editing, setEditing] = useState<ApiUser | null>(null);
   const [userForm, setUserForm] = useState({ name: "", email: "", role: "student" as "student" | "professor", department: "Computer Science", password: "" });
@@ -175,6 +222,8 @@ function AdminPortal({ section, users, courses, token, reload, previewMode }: { 
     if (previewMode) { toast.info("Database changes are paused in temporary preview mode"); return; }
     try { await campusGradeApi.createCourse(token, courseForm); setCourseOpen(false); setCourseForm({ code: "", title: "", term: "", professorId: "" }); await reload(); toast.success("Course created in MongoDB"); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to create course"); }
   };
+
+  if (section === "Analytics") return <AdminAnalytics analytics={analytics} />;
 
   if (section === "Overview") return <div className="space-y-7"><div><p className="text-sm font-bold text-[#315fe3]">Administration</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em]">Campus operations</h1><p className="mt-2 text-[#69758a]">Live totals calculated from MongoDB records.</p></div><div className="grid gap-4 sm:grid-cols-3"><StatCard icon={Users} label="Active users" value={users.filter((user) => user.active !== false).length} /><StatCard icon={GraduationCap} label="Professors" value={professors.length} /><StatCard icon={BookOpen} label="Courses" value={courses.length} /></div></div>;
 
