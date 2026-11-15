@@ -48,6 +48,17 @@ const courseName = (course: ApiAssignment["course"]) => `${course.code} · ${cou
 const formatDate = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
 const initials = (name: string) => name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 
+const previewProfessor: ApiUser = { _id: "preview-professor", campusId: "P10421", name: "Dr. Maya Chen", email: "maya.chen@campusgrade.edu", role: "professor", department: "Computer Science", active: true };
+const previewStudent: ApiUser = { _id: "preview-student", campusId: "S20845", name: "Jordan Lee", email: "jordan.lee@campusgrade.edu", role: "student", department: "Computer Science", active: true };
+const previewUsers: ApiUser[] = [
+  previewProfessor,
+  previewStudent,
+  { _id: "preview-student-2", campusId: "S20846", name: "Priya Shah", email: "priya.shah@campusgrade.edu", role: "student", department: "Information Systems", active: true },
+];
+const previewCourses: ApiCourse[] = [
+  { _id: "preview-course", code: "CS412", title: "Software Quality Engineering", term: "Fall 2026", professor: previewProfessor, students: previewUsers.filter((user) => user.role === "student"), createdAt: "2026-09-01T12:00:00.000Z" },
+];
+
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="rounded-2xl border border-dashed bg-white p-10 text-center"><BookOpen className="mx-auto size-7 text-[#98a3b4]" /><p className="mt-3 font-bold text-[#1b2b4b]">{title}</p><p className="mt-1 text-sm text-[#718096]">{detail}</p></div>;
 }
@@ -56,21 +67,22 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: string |
   return <div className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)]"><span className="grid size-10 place-items-center rounded-xl bg-[#e9efff] text-[#2457e6]"><Icon className="size-5" /></span><p className="mt-5 text-sm font-semibold text-[#69758a]">{label}</p><p className="mt-1 text-3xl font-extrabold tracking-[-0.04em] text-[#12213f]">{value}</p></div>;
 }
 
-export function CampusGradeApp({ session, onLogout }: { session: ApiSession; onLogout: () => void }) {
+export function CampusGradeApp({ session, onLogout, previewMode = false }: { session: ApiSession; onLogout: () => void; previewMode?: boolean }) {
   const role = session.user.role;
   const token = session.token;
   const [section, setSection] = useState("Overview");
   const [mobileNav, setMobileNav] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!previewMode);
   const [error, setError] = useState("");
-  const [users, setUsers] = useState<ApiUser[]>([]);
-  const [courses, setCourses] = useState<ApiCourse[]>([]);
+  const [users, setUsers] = useState<ApiUser[]>(previewMode ? previewUsers : []);
+  const [courses, setCourses] = useState<ApiCourse[]>(previewMode ? previewCourses : []);
   const [assignments, setAssignments] = useState<ApiAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ApiSubmission[]>([]);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
 
   const loadData = useCallback(async () => {
+    if (previewMode) { setLoading(false); return; }
     setError("");
     try {
       const [courseData, assignmentData, notificationData] = await Promise.all([
@@ -82,7 +94,7 @@ export function CampusGradeApp({ session, onLogout }: { session: ApiSession; onL
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "CampusGrade data could not be loaded");
     } finally { setLoading(false); }
-  }, [role, token]);
+  }, [previewMode, role, token]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -97,7 +109,7 @@ export function CampusGradeApp({ session, onLogout }: { session: ApiSession; onL
   }, [submissions]);
 
   const markNotificationRead = async (notification: ApiNotification) => {
-    if (!notification.readAt) await campusGradeApi.markNotificationRead(token, notification._id);
+    if (!previewMode && !notification.readAt) await campusGradeApi.markNotificationRead(token, notification._id);
     setNotifications((current) => current.map((item) => item._id === notification._id ? { ...item, readAt: new Date().toISOString() } : item));
   };
 
@@ -110,13 +122,13 @@ export function CampusGradeApp({ session, onLogout }: { session: ApiSession; onL
       <div className="flex items-center justify-between px-2"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#315fe3]"><GraduationCap className="size-6" /></span><div><p className="text-lg font-extrabold">CampusGrade</p><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#aabcf0]">Academic OS</p></div></div><Button size="icon-sm" variant="ghost" className="text-white lg:hidden" onClick={() => setMobileNav(false)}><X /></Button></div>
       <div className="mt-7 rounded-xl border border-white/10 bg-white/[0.055] p-3"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#9eb2e8]">Signed in as</p><div className="mt-2 flex items-center gap-3"><span className="grid size-9 place-items-center rounded-full bg-[#8ba7ff] text-xs font-extrabold text-[#10214a]">{initials(session.user.name)}</span><div className="min-w-0"><p className="truncate text-sm font-bold">{session.user.name}</p><p className="truncate text-xs capitalize text-[#aab8db]">{role}</p></div></div></div>
       <nav className="mt-6 space-y-1">{navByRole[role].map((label) => { const Icon = iconBySection[label as keyof typeof iconBySection]; return <button key={label} onClick={() => { setSection(label); setMobileNav(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold ${section === label ? "bg-[#315fe3] text-white" : "text-[#b8c5e6] hover:bg-white/[0.07] hover:text-white"}`}><Icon className="size-[1.1rem]" />{label}</button>; })}</nav>
-      <div className="mt-auto rounded-xl border border-white/10 bg-white/[0.055] p-3 text-xs leading-5 text-[#b8c5e6]">All academic records shown in this portal are loaded from MongoDB.</div>
+      <div className="mt-auto rounded-xl border border-white/10 bg-white/[0.055] p-3 text-xs leading-5 text-[#b8c5e6]">{previewMode ? "Temporary preview mode. Login and MongoDB changes are paused while the interface is being edited." : "All academic records shown in this portal are loaded from MongoDB."}</div>
     </aside>
     <div className="lg:pl-[260px]">
-      <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur sm:px-7 lg:px-9"><div className="flex items-center gap-3"><Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setMobileNav(true)}><Menu /></Button><div><p className="text-lg font-extrabold">{section}</p><p className="hidden text-xs text-[#78849a] sm:block">{session.user.department ?? "CampusGrade"}</p></div></div><div className="flex items-center gap-2"><Button size="icon" variant="outline" className="relative rounded-full" onClick={() => setNotificationOpen(true)}><Bell />{unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-[#ea5a63] px-1 text-[10px] font-bold text-white">{unreadCount}</span>}</Button><Button size="sm" variant="ghost" onClick={onLogout}><LogOut />Sign out</Button></div></header>
+      <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur sm:px-7 lg:px-9"><div className="flex items-center gap-3"><Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setMobileNav(true)}><Menu /></Button><div><p className="text-lg font-extrabold">{section}</p><p className="hidden text-xs text-[#78849a] sm:block">{session.user.department ?? "CampusGrade"}</p></div></div><div className="flex items-center gap-2">{previewMode && <Badge variant="outline" className="hidden sm:inline-flex">Preview mode</Badge>}<Button size="icon" variant="outline" className="relative rounded-full" onClick={() => setNotificationOpen(true)}><Bell />{unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-[#ea5a63] px-1 text-[10px] font-bold text-white">{unreadCount}</span>}</Button>{!previewMode && <Button size="sm" variant="ghost" onClick={onLogout}><LogOut />Sign out</Button>}</div></header>
       <main className="mx-auto max-w-[1450px] px-4 py-7 sm:px-7 lg:px-9 lg:py-9">
         {error && <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-[#f2c2bf] bg-[#fff2f1] p-4 text-sm font-semibold text-[#a8322d]"><span>{error}</span><Button size="sm" variant="outline" onClick={() => void loadData()}><RefreshCw />Retry</Button></div>}
-        {role === "admin" && <AdminPortal section={section} users={users} courses={courses} token={token} reload={loadData} />}
+        {role === "admin" && <AdminPortal section={section} users={users} courses={courses} token={token} reload={loadData} previewMode={previewMode} />}
         {role === "professor" && <ProfessorPortal section={section} courses={courses} assignments={assignments} notifications={notifications} token={token} reload={loadData} />}
         {role === "student" && <StudentPortal section={section} courses={courses} assignments={assignments} submissions={submissions} latestSubmission={latestSubmission} token={token} reload={loadData} />}
       </main>
@@ -125,7 +137,7 @@ export function CampusGradeApp({ session, onLogout }: { session: ApiSession; onL
   </div>;
 }
 
-function AdminPortal({ section, users, courses, token, reload }: { section: string; users: ApiUser[]; courses: ApiCourse[]; token: string; reload: () => Promise<void> }) {
+function AdminPortal({ section, users, courses, token, reload, previewMode }: { section: string; users: ApiUser[]; courses: ApiCourse[]; token: string; reload: () => Promise<void>; previewMode: boolean }) {
   const [userOpen, setUserOpen] = useState(false);
   const [editing, setEditing] = useState<ApiUser | null>(null);
   const [userForm, setUserForm] = useState({ name: "", email: "", role: "student" as "student" | "professor", department: "Computer Science", password: "" });
@@ -137,6 +149,7 @@ function AdminPortal({ section, users, courses, token, reload }: { section: stri
   const visibleUsers = users.filter((user) => user.role !== "admin" && `${user.name} ${user.email} ${user.campusId ?? ""}`.toLowerCase().includes(search.toLowerCase()));
 
   const openUser = (user?: ApiUser) => {
+    if (previewMode) { toast.info("Editing is paused in temporary preview mode"); return; }
     setEditing(user ?? null);
     setUserForm(user ? { name: user.name, email: user.email, role: user.role as "student" | "professor", department: user.department ?? "", password: "" } : { name: "", email: "", role: "student", department: "Computer Science", password: "" });
     setUserOpen(true);
@@ -153,17 +166,19 @@ function AdminPortal({ section, users, courses, token, reload }: { section: stri
     } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to save user"); }
   };
   const removeUser = async (user: ApiUser) => {
+    if (previewMode) { toast.info("Database changes are paused in temporary preview mode"); return; }
     if (!confirm(`Deactivate ${user.name}?`)) return;
     try { await campusGradeApi.removeUser(token, idOf(user)); await reload(); toast.success("User deactivated"); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to deactivate user"); }
   };
   const saveCourse = async (event: FormEvent) => {
     event.preventDefault();
+    if (previewMode) { toast.info("Database changes are paused in temporary preview mode"); return; }
     try { await campusGradeApi.createCourse(token, courseForm); setCourseOpen(false); setCourseForm({ code: "", title: "", term: "", professorId: "" }); await reload(); toast.success("Course created in MongoDB"); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to create course"); }
   };
 
   if (section === "Overview") return <div className="space-y-7"><div><p className="text-sm font-bold text-[#315fe3]">Administration</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em]">Campus operations</h1><p className="mt-2 text-[#69758a]">Live totals calculated from MongoDB records.</p></div><div className="grid gap-4 sm:grid-cols-3"><StatCard icon={Users} label="Active users" value={users.filter((user) => user.active !== false).length} /><StatCard icon={GraduationCap} label="Professors" value={professors.length} /><StatCard icon={BookOpen} label="Courses" value={courses.length} /></div></div>;
 
-  return <div className="space-y-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold text-[#315fe3]">{section === "People" ? "Directory" : "Academic catalog"}</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em]">{section === "People" ? "Students and faculty" : "Courses"}</h1></div>{section === "People" ? <Button onClick={() => openUser()}><UserRoundPlus />Add user</Button> : <Button onClick={() => setCourseOpen(true)} disabled={!professors.length}><Plus />Add course</Button>}</div>
+  return <div className="space-y-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold text-[#315fe3]">{section === "People" ? "Directory" : "Academic catalog"}</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em]">{section === "People" ? "Students and faculty" : "Courses"}</h1></div>{section === "People" ? <Button onClick={() => openUser()} disabled={previewMode}><UserRoundPlus />Add user</Button> : <Button onClick={() => setCourseOpen(true)} disabled={previewMode || !professors.length}><Plus />Add course</Button>}</div>
     {section === "People" ? <section className="rounded-2xl border bg-white p-5"><div className="relative mb-4 max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search users" /></div>{visibleUsers.length ? <Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>ID</TableHead><TableHead>Role</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>{visibleUsers.map((user) => <TableRow key={idOf(user)}><TableCell><p className="font-bold">{user.name}</p><p className="text-xs text-[#78849a]">{user.email}</p></TableCell><TableCell className="font-mono">{user.campusId}</TableCell><TableCell className="capitalize">{user.role}</TableCell><TableCell>{user.department}</TableCell><TableCell className="text-right"><Button size="sm" variant="ghost" onClick={() => openUser(user)}>Edit</Button><Button size="icon-sm" variant="ghost" className="text-[#c93832]" onClick={() => void removeUser(user)}><Trash2 /></Button></TableCell></TableRow>)}</TableBody></Table> : <EmptyState title="No users yet" detail="Create the first professor or student." />}</section> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{courses.length ? courses.map((course) => <article key={course._id} className="rounded-2xl border bg-white p-5"><Badge variant="outline">{course.code}</Badge><h2 className="mt-4 text-lg font-extrabold">{course.title}</h2><p className="mt-1 text-sm text-[#69758a]">{course.term}</p><div className="mt-5 border-t pt-4 text-sm"><p className="font-semibold">Professor: {course.professor?.name}</p><p className="mt-1 text-[#78849a]">{course.students?.length ?? 0} students</p></div></article>) : <EmptyState title="No courses yet" detail={professors.length ? "Create the first course." : "Create a professor before creating a course."} />}</section>}
     <Dialog open={userOpen} onOpenChange={setUserOpen}><DialogContent><form onSubmit={saveUser}><DialogHeader><DialogTitle>{editing ? "Edit user" : "Create campus user"}</DialogTitle><DialogDescription>Account information will be stored in MongoDB.</DialogDescription></DialogHeader><div className="grid gap-4 py-5"><label className="grid gap-1.5 text-sm font-semibold">Full name<Input required value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Email<Input required type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Role<Select value={userForm.role} onValueChange={(value) => setUserForm({ ...userForm, role: value as "student" | "professor" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="student">Student</SelectItem><SelectItem value="professor">Professor</SelectItem></SelectContent></Select></label><label className="grid gap-1.5 text-sm font-semibold">Department<Input required value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">{editing ? "New password (optional)" : "Password (optional)"}<Input type="password" minLength={8} value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} /><span className="text-xs font-normal text-[#78849a]">Leave blank to generate a temporary password.</span></label></div><DialogFooter><Button type="button" variant="outline" onClick={() => setUserOpen(false)}>Cancel</Button><Button type="submit">Save user</Button></DialogFooter></form></DialogContent></Dialog>
     <Dialog open={courseOpen} onOpenChange={setCourseOpen}><DialogContent><form onSubmit={saveCourse}><DialogHeader><DialogTitle>Create course</DialogTitle><DialogDescription>The course and professor relationship will be stored in MongoDB.</DialogDescription></DialogHeader><div className="grid gap-4 py-5"><label className="grid gap-1.5 text-sm font-semibold">Course code<Input required value={courseForm.code} onChange={(event) => setCourseForm({ ...courseForm, code: event.target.value.toUpperCase() })} placeholder="CS412" /></label><label className="grid gap-1.5 text-sm font-semibold">Course title<Input required value={courseForm.title} onChange={(event) => setCourseForm({ ...courseForm, title: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Term<Input required value={courseForm.term} onChange={(event) => setCourseForm({ ...courseForm, term: event.target.value })} placeholder="Fall 2026" /></label><label className="grid gap-1.5 text-sm font-semibold">Professor<Select required value={courseForm.professorId} onValueChange={(value) => setCourseForm({ ...courseForm, professorId: value })}><SelectTrigger><SelectValue placeholder="Select professor" /></SelectTrigger><SelectContent>{professors.map((professor) => <SelectItem key={idOf(professor)} value={idOf(professor)}>{professor.name}</SelectItem>)}</SelectContent></Select></label></div><DialogFooter><Button type="button" variant="outline" onClick={() => setCourseOpen(false)}>Cancel</Button><Button type="submit">Create course</Button></DialogFooter></form></DialogContent></Dialog>
