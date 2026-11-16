@@ -44,6 +44,10 @@ const submissionSchema = new mongoose.Schema({
   facultyFeedback: String,
   finalizedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   scoreReleasedAt: Date,
+  improvementRequestedAt: Date,
+  improvementRequestMessage: String,
+  returnedAt: Date,
+  resubmissionDueAt: Date,
   submittedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 

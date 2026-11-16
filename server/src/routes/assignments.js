@@ -65,21 +65,28 @@ router.post("/", allowRoles("admin", "professor"), async (req, res, next) => {
 });
 router.patch("/:id", allowRoles("admin", "professor"), async (req, res, next) => {
   try {
-    const assignment = await Assignment.findOne({ _id: req.params.id, ...(req.user.role === "professor" ? { createdBy: req.user.id } : {}) });
+    const input = assignmentSchema.omit({ course: true }).partial().parse(req.body);
+    const assignment = await Assignment.findById(req.params.id);
     if (!assignment) return res.status(404).json({ message: "Assignment not found" });
+    if (req.user.role === "professor") {
+      const course = await Course.findOne({ _id: assignment.course, professor: req.user.id });
+      if (!course) return res.status(403).json({ message: "This assignment belongs to another professor" });
+    }
     const wasPublished = assignment.status === "published";
-    Object.assign(assignment, req.body);
+    const previousDueAt = assignment.dueAt?.getTime();
+    Object.assign(assignment, input);
     await assignment.save();
 
-    if (!wasPublished && assignment.status === "published") {
+    const dueDateChanged = input.dueAt && assignment.dueAt?.getTime() !== previousDueAt;
+    if ((!wasPublished && assignment.status === "published") || dueDateChanged) {
       const course = await Course.findById(assignment.course).select("students");
       if (course?.students.length) {
         await Notification.insertMany(course.students.map((student) => ({
           recipient: student,
           actor: req.user.id,
-          type: "assignment_published",
-          title: "New assignment published",
-          message: `${assignment.title} is now available and due ${assignment.dueAt.toLocaleString()}.`,
+          type: dueDateChanged && wasPublished ? "system" : "assignment_published",
+          title: dueDateChanged && wasPublished ? "Assignment deadline updated" : "New assignment published",
+          message: dueDateChanged && wasPublished ? `${assignment.title} is now due ${assignment.dueAt.toLocaleString()}.` : `${assignment.title} is now available and due ${assignment.dueAt.toLocaleString()}.`,
           assignment: assignment.id,
         })));
       }
