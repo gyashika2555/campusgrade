@@ -45,10 +45,13 @@ router.post("/generate", allowRoles("admin", "professor"), async (req, res, next
 router.post("/", allowRoles("admin", "professor"), async (req, res, next) => {
   try {
     const input = assignmentSchema.parse(req.body);
+    if (input.status === "published" && input.dueAt.getTime() <= Date.now()) {
+      return res.status(409).json({ message: "The original deadline has passed. This assignment can no longer be published" });
+    }
     const course = await Course.findOne({ _id: input.course, ...(req.user.role === "professor" ? { professor: req.user.id } : {}) });
     if (!course) return res.status(404).json({ message: "Course not found or unavailable" });
     const assignmentCode = await generateAssignmentCode(req.user.id);
-    const assignment = await Assignment.create({ ...input, assignmentCode, createdBy: req.user.id });
+    const assignment = await Assignment.create({ ...input, originalDueAt: input.dueAt, assignmentCode, createdBy: req.user.id });
     if (assignment.status === "published" && course.students.length) {
       await Notification.insertMany(course.students.map((student) => ({
         recipient: student,
@@ -71,6 +74,18 @@ router.patch("/:id", allowRoles("admin", "professor"), async (req, res, next) =>
     if (req.user.role === "professor") {
       const course = await Course.findOne({ _id: assignment.course, professor: req.user.id });
       if (!course) return res.status(403).json({ message: "This assignment belongs to another professor" });
+    }
+    const originalDueAt = assignment.originalDueAt ?? assignment.dueAt;
+    if (!assignment.originalDueAt) assignment.originalDueAt = originalDueAt;
+    const originalDeadlinePassed = originalDueAt.getTime() <= Date.now();
+    if (originalDeadlinePassed && input.dueAt) {
+      return res.status(409).json({ message: "The original assignment deadline has passed and can no longer be changed" });
+    }
+    if (originalDeadlinePassed && input.status === "published" && assignment.status !== "published") {
+      return res.status(409).json({ message: "The original deadline has passed. This assignment can no longer be published" });
+    }
+    if (originalDeadlinePassed && input.questions && input.questions.length > assignment.questions.length) {
+      return res.status(409).json({ message: "Questions cannot be added after the original assignment deadline" });
     }
     const wasPublished = assignment.status === "published";
     const previousDueAt = assignment.dueAt?.getTime();

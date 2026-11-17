@@ -148,7 +148,7 @@ router.patch("/:id/request-improvement", allowRoles("student"), async (req, res,
 
 router.patch("/:id/return-for-improvement", allowRoles("admin", "professor"), async (req, res, next) => {
   try {
-    const input = z.object({ facultyFeedback: z.string().trim().min(3).max(5000), resubmissionDueAt: z.coerce.date().optional() }).parse(req.body);
+    const input = z.object({ facultyFeedback: z.string().trim().min(3).max(5000), resubmissionDueAt: z.coerce.date() }).parse(req.body);
     const submission = await Submission.findById(req.params.id).populate("assignment", "title course");
     if (!submission) return res.status(404).json({ message: "Submission not found" });
     if (req.user.role === "professor") {

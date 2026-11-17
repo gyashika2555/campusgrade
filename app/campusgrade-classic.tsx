@@ -119,6 +119,7 @@ type Assignment = {
   course: string;
   due: string;
   dueAt: string;
+  originalDueAt?: string;
   points: number;
   status: AssignmentStatus;
   grade?: number;
@@ -314,6 +315,10 @@ function getDeadlineInfo(assignment: Assignment) {
   return { label: `${days} day${days === 1 ? "" : "s"} remaining`, className: "border-[#c9d6fa] bg-[#eef3ff] text-[#315fe3]" };
 }
 
+function hasOriginalDeadlinePassed(assignment: Assignment) {
+  return new Date(assignment.originalDueAt ?? assignment.dueAt).getTime() <= Date.now();
+}
+
 function formatDueAt(dueAt: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -372,7 +377,7 @@ function apiAssignmentToClassic(assignment: ApiAssignment, submission?: ApiSubmi
   return {
     id: numericId(assignment._id), remoteId: assignment._id, courseId: course._id, submissionId: submission?._id,
     assignmentCode: assignment.assignmentCode, title: assignment.title,
-    course: `${course.code} · ${course.title}`, due: formatDueAt(assignment.dueAt), dueAt: assignment.dueAt,
+    course: `${course.code} · ${course.title}`, due: formatDueAt(assignment.dueAt), dueAt: assignment.dueAt, originalDueAt: assignment.originalDueAt ?? assignment.dueAt,
     points: assignment.totalPoints, status, grade: submission?.finalGrade, feedback: submission?.facultyFeedback,
     attempts: submission?.attemptNumber ?? 0,
     questions: assignment.questions.map((question) => ({ id: question._id, prompt: question.prompt, type: question.type, points: question.points, language: question.language })),
@@ -590,7 +595,7 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
     const title = generated?.title ?? assignmentForm.topic.replace(/\b\w/g, (letter) => letter.toUpperCase());
     const deadline = new Date(`${assignmentForm.dueDate}T${assignmentForm.dueTime}:00`);
     const created: Assignment = {
-      id: Date.now(), assignmentCode: generatePrefixedCode("A", assignments.map((assignment) => assignment.assignmentCode)), title, course: "CS 412 · Web Engineering", due: formatDueAt(deadline.toISOString()), dueAt: deadline.toISOString(), points: 100, status: "new", attempts: 0, aiEvaluationEnabled: assignmentForm.aiEvaluationEnabled, plagiarismCheckEnabled: assignmentForm.plagiarismCheckEnabled, plagiarismThreshold: Number(assignmentForm.plagiarismThreshold),
+      id: Date.now(), assignmentCode: generatePrefixedCode("A", assignments.map((assignment) => assignment.assignmentCode)), title, course: "CS 412 · Web Engineering", due: formatDueAt(deadline.toISOString()), dueAt: deadline.toISOString(), originalDueAt: deadline.toISOString(), points: 100, status: "new", attempts: 0, aiEvaluationEnabled: assignmentForm.aiEvaluationEnabled, plagiarismCheckEnabled: assignmentForm.plagiarismCheckEnabled, plagiarismThreshold: Number(assignmentForm.plagiarismThreshold),
       questions: generated?.questions?.map((question, index) => ({ ...question, id: `q-${Date.now()}-${index + 1}` })) ?? [
         { id: `q-${Date.now()}-1`, prompt: `Explain the key design decisions and tradeoffs for ${assignmentForm.topic}.`, type: "text", points: 25 },
         { id: `q-${Date.now()}-2`, prompt: `Write the core implementation for ${assignmentForm.topic}. Include validation and clear error handling.`, type: "code", points: 50, language: "JavaScript" },
@@ -609,6 +614,10 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
     setAssignments((current) => current.map((assignment) => assignment.id === updated.id ? updated : assignment));
   };
   const openDeadlineEditor = (assignment: Assignment) => {
+    if (hasOriginalDeadlinePassed(assignment)) {
+      toast.error("The original assignment deadline has passed and can no longer be changed.");
+      return;
+    }
     const due = new Date(assignment.dueAt);
     const offset = due.getTimezoneOffset() * 60_000;
     setDeadlineAssignment(assignment);
@@ -616,6 +625,11 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
   };
   const saveDeadline = async () => {
     if (!deadlineAssignment || !deadlineForm.dueDate) return;
+    if (hasOriginalDeadlinePassed(deadlineAssignment)) {
+      setDeadlineAssignment(null);
+      toast.error("The original assignment deadline has passed and can no longer be changed.");
+      return;
+    }
     const dueAt = new Date(`${deadlineForm.dueDate}T${deadlineForm.dueTime}:00`).toISOString();
     if (session && deadlineAssignment.remoteId) {
       try { await campusGradeApi.updateAssignment(session.token, deadlineAssignment.remoteId, { dueAt }); }
@@ -658,6 +672,10 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
   };
   const publishAssignment = async () => {
     if (!homeworkDialog) return;
+    if (hasOriginalDeadlinePassed(homeworkDialog)) {
+      toast.error("The original deadline has passed. This assignment can no longer be published.");
+      return;
+    }
     let publishedAssignment = homeworkDialog;
     if (session && !homeworkDialog.remoteId) {
       if (!remoteCourses[0]) return toast.error("Create or assign a course before publishing");
@@ -730,8 +748,11 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
     toast.success("Improvement request sent to your professor");
   };
   const returnForImprovement = async () => {
-    if (!returnDialog || returnForm.feedback.trim().length < 3) return toast.error("Add improvement instructions");
-    const resubmissionDueAt = returnForm.dueDate ? new Date(`${returnForm.dueDate}T${returnForm.dueTime}:00`).toISOString() : undefined;
+    if (!returnDialog) return;
+    if (returnForm.feedback.trim().length < 3) return toast.error("Add improvement instructions");
+    if (!returnForm.dueDate) return toast.error("Select a new due date");
+    if (!returnForm.dueTime) return toast.error("Select a due time");
+    const resubmissionDueAt = new Date(`${returnForm.dueDate}T${returnForm.dueTime}:00`).toISOString();
     if (session && returnDialog.evaluation.remoteId) {
       try { await campusGradeApi.returnForImprovement(session.token, returnDialog.evaluation.remoteId, { facultyFeedback: returnForm.feedback, resubmissionDueAt }); }
       catch (error) { toast.error(error instanceof Error ? error.message : "Homework could not be returned"); return; }
@@ -787,6 +808,10 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
     return () => lifecycle.abort();
   }, [session]);
 
+  const evaluationProfessorPoints = evaluationDetail
+    ? evaluationDetail.assignment.questions.reduce((sum, question) => sum + (evaluationQuestionScores[evaluationDetail.evaluation.id]?.[question.id] ?? 0), 0)
+    : 0;
+
   return <div className="min-h-screen bg-[#f4f7fb] text-[#14213d]">
     <Toaster position="top-right" richColors duration={4500} />
     {mobileNav && <button className="fixed inset-0 z-30 bg-[#07142d]/45 lg:hidden" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
@@ -801,7 +826,7 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
       <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur sm:px-7 lg:px-9"><div className="flex items-center gap-3"><Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setMobileNav(true)}><Menu /></Button><div><p className="text-lg font-extrabold tracking-[-0.025em] text-[#12213f]">{activeSection}</p><p className="hidden text-xs font-medium text-[#78849a] sm:block">{meta.label} portal · {meta.subtitle}</p></div></div><div className="flex items-center gap-2 sm:gap-3"><div className={backendMode ? "hidden" : "hidden items-center gap-2 rounded-lg border bg-[#f8faff] px-2.5 py-1.5 md:flex"}><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#8290a6]">Demo role</span><Select value={role} onValueChange={(value) => switchRole(value as Role)}><SelectTrigger className="h-8 min-w-[122px] border-0 bg-white shadow-none"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="professor">Professor</SelectItem><SelectItem value="student">Student</SelectItem></SelectContent></Select></div><Select value={role} onValueChange={(value) => switchRole(value as Role)}><SelectTrigger aria-label="Switch demo portal" className={backendMode ? "hidden" : "w-[118px] md:hidden"}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="professor">Professor</SelectItem><SelectItem value="student">Student</SelectItem></SelectContent></Select><Button size="icon" variant="outline" className="relative rounded-full" aria-label="Open notifications" onClick={() => setNotificationDialog(true)}><Bell />{unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full border-2 border-white bg-[#ea5a63] px-1 text-[10px] font-bold text-white">{unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}</span>}</Button><div className="hidden size-9 place-items-center rounded-full bg-[#dbe4ff] text-xs font-extrabold text-[#2146ad] sm:grid">{meta.initials}</div></div></header>
       <main className="mx-auto max-w-[1500px] px-4 py-7 sm:px-7 lg:px-9 lg:py-9">
         {backendLoading && <div className="mb-5 rounded-xl border border-[#cbd7fa] bg-[#f3f6ff] px-4 py-3 text-sm font-semibold text-[#3155b7]">Loading CampusGrade data from MongoDB…</div>}
-        {role === "admin" && <AdminPortal section={activeSection} people={people} assignments={assignments} search={search} setSearch={setSearch} openPerson={openPerson} removePerson={removePerson} />}
+        {role === "admin" && <AdminPortal section={activeSection} people={people} assignments={assignments} courses={remoteCourses} search={search} setSearch={setSearch} openPerson={openPerson} removePerson={removePerson} />}
         {role === "professor" && <ProfessorPortal section={activeSection} people={people} assignments={assignments} openPerson={openPerson} removePerson={removePerson} openGenerator={() => setAssignmentDialog(true)} preview={(assignment) => openHomework(assignment, "preview")} openAssignment={setAssignmentDetail} editDeadline={openDeadlineEditor} releaseAllScores={releaseAllScores} />}
         {role === "student" && <StudentPortal section={activeSection} assignments={assignments} openHomework={openHomework} feedback={openFeedback} viewAllFeedback={() => setFeedbackHistoryDialog(true)} />}
       </main>
@@ -815,7 +840,7 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
 
     <Dialog open={Boolean(improvementDialog)} onOpenChange={(open) => !open && setImprovementDialog(null)}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Request improvement</DialogTitle><DialogDescription>Tell your professor what you want to improve. Your answers remain locked until the professor approves another attempt.</DialogDescription></DialogHeader><label className="grid gap-1.5 py-5 text-sm font-semibold">Message<Textarea className="min-h-28" value={improvementMessage} onChange={(event) => setImprovementMessage(event.target.value)} placeholder="I would like to improve my error handling and boundary tests." /></label><DialogFooter><Button variant="outline" onClick={() => setImprovementDialog(null)}>Cancel</Button><Button onClick={sendImprovementRequest}><Send />Send request</Button></DialogFooter></DialogContent></Dialog>
 
-    <Dialog open={Boolean(returnDialog)} onOpenChange={(open) => !open && setReturnDialog(null)}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Return for improvement</DialogTitle><DialogDescription>The student will be able to edit the answers and submit a new attempt.</DialogDescription></DialogHeader><div className="grid gap-4 py-5"><label className="grid gap-1.5 text-sm font-semibold">Improvement instructions<Textarea className="min-h-28" value={returnForm.feedback} onChange={(event) => setReturnForm({ ...returnForm, feedback: event.target.value })} /></label><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-semibold">New due date (optional)<Input type="date" value={returnForm.dueDate} onChange={(event) => setReturnForm({ ...returnForm, dueDate: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Due time<Input type="time" value={returnForm.dueTime} onChange={(event) => setReturnForm({ ...returnForm, dueTime: event.target.value })} /></label></div></div><DialogFooter><Button variant="outline" onClick={() => setReturnDialog(null)}>Cancel</Button><Button onClick={returnForImprovement}><RotateCcw />Return homework</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(returnDialog)} onOpenChange={(open) => !open && setReturnDialog(null)}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Return for improvement</DialogTitle><DialogDescription>The student will be able to edit the answers and submit a new attempt. All fields are required.</DialogDescription></DialogHeader><div className="grid gap-4 py-5"><label className="grid gap-1.5 text-sm font-semibold">Improvement instructions <span className="text-[#c93832]">*</span><Textarea required className="min-h-28" value={returnForm.feedback} onChange={(event) => setReturnForm({ ...returnForm, feedback: event.target.value })} /></label><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-semibold">New due date <span className="text-[#c93832]">*</span><Input required type="date" value={returnForm.dueDate} onChange={(event) => setReturnForm({ ...returnForm, dueDate: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Due time <span className="text-[#c93832]">*</span><Input required type="time" value={returnForm.dueTime} onChange={(event) => setReturnForm({ ...returnForm, dueTime: event.target.value })} /></label></div></div><DialogFooter><Button variant="outline" onClick={() => setReturnDialog(null)}>Cancel</Button><Button disabled={returnForm.feedback.trim().length < 3 || !returnForm.dueDate || !returnForm.dueTime} onClick={returnForImprovement}><RotateCcw />Return homework</Button></DialogFooter></DialogContent></Dialog>
 
     <Dialog open={Boolean(assignmentDetail)} onOpenChange={(open) => !open && setAssignmentDetail(null)}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><DialogTitle>{assignmentDetail?.title}</DialogTitle><DialogDescription>{assignmentDetail?.assignmentCode} · {assignmentDetail?.course} · {assignmentDetail?.questions.length} questions · Due {assignmentDetail?.due}</DialogDescription></DialogHeader>{assignmentDetail && <><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl border bg-[#f8faff] p-4"><p className="text-xs font-bold uppercase tracking-[0.1em] text-[#77849a]">Submitted</p><p className="mt-1 text-2xl font-extrabold">{evaluationsFor(assignmentDetail).length} <span className="text-sm font-semibold text-[#7b8799]">of 32</span></p></div><div className="rounded-xl border bg-[#f8faff] p-4"><p className="text-xs font-bold uppercase tracking-[0.1em] text-[#77849a]">{assignmentDetail.aiEvaluationEnabled ? "AI evaluated" : "Grading mode"}</p><p className={`mt-1 font-extrabold ${assignmentDetail.aiEvaluationEnabled ? "text-2xl text-[#16866a]" : "text-base text-[#a75b12]"}`}>{assignmentDetail.aiEvaluationEnabled ? evaluationsFor(assignmentDetail).length : "Manual review"}</p></div><div className="rounded-xl border bg-[#f8faff] p-4"><p className="text-xs font-bold uppercase tracking-[0.1em] text-[#77849a]">Plagrism check</p><p className="mt-1 text-2xl font-extrabold text-[#315fe3]">{assignmentDetail.plagiarismCheckEnabled ? `${assignmentDetail.plagiarismThreshold}% allowed` : "Off"}</p></div></div><div className="overflow-hidden rounded-xl border"><Table><TableHeader className="bg-[#f7f9fc]"><TableRow><TableHead className="pl-4">Student</TableHead><TableHead>Submitted</TableHead><TableHead>Score</TableHead><TableHead>Plagrism</TableHead><TableHead className="text-right">Assignment</TableHead></TableRow></TableHeader><TableBody>{evaluationsFor(assignmentDetail).map((evaluation) => <TableRow key={evaluation.id}><TableCell className="pl-4 font-bold">{evaluation.student}</TableCell><TableCell className="text-[#68758a]">{evaluation.submittedAt}</TableCell><TableCell>{assignmentDetail.aiEvaluationEnabled ? <Badge variant="outline" className="border-[#bce7da] bg-[#eaf9f4] text-[#11765f]">{evaluationScores[evaluation.id] ?? evaluation.score}% · evaluated</Badge> : <Badge variant="outline" className="border-[#eed3b2] bg-[#fff6e8] text-[#9a5b18]">Manual grading</Badge>}</TableCell><TableCell>{assignmentDetail.plagiarismCheckEnabled ? <span className={`font-bold ${evaluation.plagiarism > assignmentDetail.plagiarismThreshold ? "text-[#c93832]" : "text-[#5f6d82]"}`}>{evaluation.plagiarism}%</span> : <span className="text-sm text-[#8a96a8]">Not checked</span>}</TableCell><TableCell className="text-right"><Button size="sm" variant="outline" onClick={() => openEvaluation(assignmentDetail, evaluation)}>Open submission</Button></TableCell></TableRow>)}</TableBody></Table></div><DialogFooter className="gap-2 sm:justify-between"><Button variant="outline" onClick={() => openHomework(assignmentDetail, "preview")}><BookOpen />View questions</Button><Button onClick={() => releaseAllScores(assignmentDetail)}><CheckCircle2 />Submit all scores</Button></DialogFooter></>}</DialogContent></Dialog>
 
@@ -841,7 +866,7 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
               <div className="rounded-xl border border-[#c7e8de] bg-[#eefaf6] p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#58786f]">AI score</p>
                 <p className="mt-1 text-3xl font-extrabold text-[#16866a]">
-                  {evaluationDetail.assignment.aiEvaluationEnabled ? (evaluationScores[evaluationDetail.evaluation.id] ?? evaluationDetail.evaluation.score) + "%" : "Not run"}
+                  {evaluationDetail.assignment.aiEvaluationEnabled ? evaluationDetail.evaluation.score + "%" : "Not run"}
                 </p>
               </div>
               <button
@@ -858,10 +883,11 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
                   {evaluationDetail.assignment.plagiarismCheckEnabled ? "View matched evidence →" : "Plagrism check was disabled"}
                 </span>
               </button>
-              <label className="rounded-xl border bg-white p-4 text-xs font-bold uppercase tracking-[0.1em] text-[#77849a]">
-                Professor score
-                <Input type="number" min="0" max="100" value={manualScore} onChange={(event) => setManualScore(event.target.value)} className="mt-2 text-base font-bold normal-case tracking-normal" />
-              </label>
+              <div className="rounded-xl border border-[#cbd7fa] bg-[#f3f6ff] p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#64759c]">Professor score</p>
+                <p className="mt-1 text-3xl font-extrabold text-[#315fe3]">{manualScore}%</p>
+                <p className="mt-1 text-xs font-bold text-[#64759c]">{evaluationProfessorPoints} / {evaluationDetail.assignment.points} marks</p>
+              </div>
             </div>
             <div className="rounded-xl border bg-[#f8faff] p-4">
               <p className="text-sm font-bold text-[#1b2b4b]">AI evaluation summary</p>
@@ -875,8 +901,6 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
             <div className="grid gap-3">
               {evaluationDetail.assignment.questions.map((question, index) => {
                 const assessment = questionAssessmentFor(evaluationDetail.assignment, evaluationDetail.evaluation, question, index);
-                const awardedPercentage = assessment.awardedPoints === null ? null : (assessment.awardedPoints / question.points) * 100;
-
                 return (
                   <section key={question.id} className="rounded-xl border p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -884,19 +908,10 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
                         <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#77849a]">Question {index + 1}</p>
                         <p className="mt-1 font-bold">{question.prompt}</p>
                       </div>
-                      <div className="flex shrink-0 flex-wrap gap-2">
-                        <Badge variant="outline" className="border-[#cbd7fa] bg-[#f3f6ff] text-[#3155b7]">Maximum {question.points} pts</Badge>
-                        <Badge
-                          variant="outline"
-                          className={awardedPercentage === null
-                            ? "border-[#d8dee8] bg-[#f3f5f8] text-[#68758a]"
-                            : awardedPercentage >= 80
-                              ? "border-[#bce7da] bg-[#eaf9f4] text-[#11765f]"
-                              : "border-[#f0cda6] bg-[#fff5e8] text-[#a45b17]"}
-                        >
-                          {assessment.awardedPoints === null ? "AI not run" : "AI awarded " + assessment.awardedPoints + " pts"}
-                        </Badge>
-                        <label className="grid min-w-36 gap-1 rounded-lg border bg-white p-2 text-xs font-bold text-[#5f6d82]">Marks received<div className="flex items-center gap-2"><Input type="number" min="0" max={question.points} value={evaluationQuestionScores[evaluationDetail.evaluation.id]?.[question.id] ?? assessment.awardedPoints ?? 0} onChange={(event) => updateQuestionScore(evaluationDetail, question, Number(event.target.value))} className="h-8 w-20" /><span>/ {question.points}</span></div></label>
+                      <div className="flex shrink-0 items-center overflow-hidden rounded-lg border bg-[#f8faff] text-center">
+                        <div className="min-w-16 px-2.5 py-1.5"><p className="text-[10px] font-bold uppercase tracking-[0.06em] text-[#7b8799]">Maximum</p><p className="text-sm font-extrabold text-[#1b2b4b]">{question.points}</p></div>
+                        <div className="min-w-16 border-l px-2.5 py-1.5"><p className="text-[10px] font-bold uppercase tracking-[0.06em] text-[#7b8799]">AI score</p><p className="text-sm font-extrabold text-[#16866a]">{assessment.awardedPoints ?? "—"}</p></div>
+                        <label className="min-w-20 border-l px-2.5 py-1.5"><span className="block text-[10px] font-bold uppercase tracking-[0.06em] text-[#7b8799]">Marks given</span><Input aria-label={`Marks given for question ${index + 1}`} type="number" min="0" max={question.points} value={evaluationQuestionScores[evaluationDetail.evaluation.id]?.[question.id] ?? assessment.awardedPoints ?? 0} onChange={(event) => updateQuestionScore(evaluationDetail, question, Number(event.target.value))} className="mx-auto mt-0.5 h-7 w-14 bg-white px-1 text-center text-sm font-extrabold" /></label>
                       </div>
                     </div>
                     <div className={question.type === "code" ? "mt-3 whitespace-pre-wrap rounded-lg bg-[#101827] p-3 font-mono text-sm leading-6 text-[#d9e4f5]" : "mt-3 whitespace-pre-wrap rounded-lg bg-[#f6f8fb] p-3 text-sm leading-6 text-[#5f6d82]"}>
@@ -916,11 +931,6 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
             <DialogFooter className="gap-2 sm:justify-between">
               <Button variant="outline" onClick={() => setEvaluationDetail(null)}>Close</Button>
               <Button variant="outline" onClick={() => { setReturnDialog(evaluationDetail); setReturnForm({ feedback: professorFeedback || "Please review the question-level feedback and improve your answers.", dueDate: "", dueTime: "23:59" }); }}><RotateCcw />Return for improvement</Button>
-              <Button variant="secondary" onClick={() => {
-                const score = Math.max(0, Math.min(100, Number(manualScore)));
-                setEvaluationScores((current) => ({ ...current, [evaluationDetail.evaluation.id]: score }));
-                toast.success("Manual score updated");
-              }}>Update score</Button>
               <Button onClick={() => {
                 const score = Math.max(0, Math.min(100, Number(manualScore)));
                 releaseScoreToStudent(evaluationDetail, score);
@@ -996,7 +1006,7 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
 
     <Dialog open={assignmentDialog} onOpenChange={setAssignmentDialog}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl"><form onSubmit={generateAssignment}><DialogHeader><div className="mb-1 grid size-10 place-items-center rounded-xl bg-[#efeaff] text-[#7151c8]"><Sparkles className="size-5" /></div><DialogTitle>Generate assignment with AI</DialogTitle><DialogDescription>CampusGrade will create the brief, requirements, test cases, and grading rubric for faculty review.</DialogDescription></DialogHeader><div className="grid gap-4 py-5"><label className="grid gap-1.5 text-sm font-semibold">Topic<Input required value={assignmentForm.topic} onChange={(event) => setAssignmentForm({ ...assignmentForm, topic: event.target.value })} placeholder="e.g. secure REST API with Node.js" autoFocus /></label><label className="grid gap-1.5 text-sm font-semibold">Learning outcomes<Textarea value={assignmentForm.outcome} onChange={(event) => setAssignmentForm({ ...assignmentForm, outcome: event.target.value })} placeholder="Students should demonstrate authentication, validation, testing..." /></label><label className="grid gap-1.5 text-sm font-semibold">Difficulty<Select value={assignmentForm.difficulty} onValueChange={(value) => setAssignmentForm({ ...assignmentForm, difficulty: value })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Beginner">Beginner</SelectItem><SelectItem value="Intermediate">Intermediate</SelectItem><SelectItem value="Advanced">Advanced</SelectItem></SelectContent></Select></label><div><div className="grid items-start gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-semibold">Due date<Input required type="date" value={assignmentForm.dueDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, dueDate: event.target.value })} /></label><label className="grid gap-1.5 text-sm font-semibold">Due time<Input required type="time" value={assignmentForm.dueTime} onChange={(event) => setAssignmentForm({ ...assignmentForm, dueTime: event.target.value })} /></label></div><p className="mt-1.5 text-xs text-[#7b8799]">Due time defaults to 11:59 PM and can be changed.</p></div><section className="rounded-xl border bg-[#f8faff] p-4"><div className="mb-3"><p className="text-sm font-bold text-[#1b2b4b]">AI evaluation settings</p><p className="mt-1 text-xs text-[#718096]">Choose what CampusGrade should run automatically after submission.</p></div><div className="grid gap-3"><label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-3"><Checkbox checked={assignmentForm.aiEvaluationEnabled} onCheckedChange={(checked) => setAssignmentForm({ ...assignmentForm, aiEvaluationEnabled: checked === true })} /><span><span className="block text-sm font-semibold">Evaluate assignment with AI</span><span className="mt-0.5 block text-xs text-[#718096]">Generate a preliminary score and feedback for professor review.</span></span></label><label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-3"><Checkbox checked={assignmentForm.plagiarismCheckEnabled} onCheckedChange={(checked) => setAssignmentForm({ ...assignmentForm, plagiarismCheckEnabled: checked === true })} /><span><span className="block text-sm font-semibold">Check plagrism with AI</span><span className="mt-0.5 block text-xs text-[#718096]">Compare submission similarity against the allowed threshold.</span></span></label>{assignmentForm.plagiarismCheckEnabled && <label className="grid gap-1.5 text-sm font-semibold">Allowed plagrism<Select value={assignmentForm.plagiarismThreshold} onValueChange={(value) => setAssignmentForm({ ...assignmentForm, plagiarismThreshold: value })}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{[10, 20, 30, 40, 50].map((value) => <SelectItem key={value} value={String(value)}>{value}%</SelectItem>)}</SelectContent></Select></label>}</div></section></div><DialogFooter><Button type="button" variant="outline" onClick={() => setAssignmentDialog(false)}>Cancel</Button><Button type="submit" className="bg-[#6c4bc5] hover:bg-[#593ba9]"><Sparkles />Generate draft</Button></DialogFooter></form></DialogContent></Dialog>
 
-    <Dialog open={Boolean(homeworkDialog)} onOpenChange={(open) => !open && setHomeworkDialog(null)}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><div className="flex flex-wrap items-center gap-2"><DialogTitle>{homeworkDialog?.title}</DialogTitle>{homeworkDialog && <Badge variant="outline" className="font-mono">{homeworkDialog.assignmentCode}</Badge>}{homeworkMode === "view" && <Badge variant="outline" className="border-[#d8dee8] bg-[#f3f5f8] text-[#5f6d82]"><ShieldCheck />Submitted · locked</Badge>}{homeworkMode === "preview" && <Badge className="bg-[#efeaff] text-[#6545bd]"><Sparkles />Professor preview</Badge>}</div><DialogDescription>{homeworkDialog?.course} · {homeworkDialog?.questions.length} questions · {homeworkDialog?.points} points · Due {homeworkDialog?.due}</DialogDescription></DialogHeader>{homeworkDialog && homeworkMode === "preview" && <div className="flex flex-wrap gap-2"><Badge variant="outline" className={homeworkDialog.aiEvaluationEnabled ? "border-[#bce7da] bg-[#eaf9f4] text-[#11765f]" : "border-[#eed3b2] bg-[#fff6e8] text-[#9a5b18]"}>{homeworkDialog.aiEvaluationEnabled ? "AI evaluation on" : "Manual grading"}</Badge><Badge variant="outline" className="border-[#d7def3] bg-[#f6f8ff] text-[#405481]">{homeworkDialog.plagiarismCheckEnabled ? `Plagrism limit ${homeworkDialog.plagiarismThreshold}%` : "Plagrism check off"}</Badge></div>}{homeworkMode === "view" && <div className="flex items-start gap-3 rounded-xl border border-[#d9e0eb] bg-[#f6f8fb] p-3 text-sm text-[#5d6b84]"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><p>This submitted attempt is read-only. Answers cannot be edited after submission.</p></div>}{homeworkDialog?.returnedForImprovement && homeworkMode === "edit" && <div className="rounded-xl border border-[#f0cda6] bg-[#fff8ed] p-4"><p className="font-extrabold text-[#925a12]">Professor returned this homework for improvement</p><p className="mt-1 text-sm leading-6 text-[#6f5a40]">{homeworkDialog.feedback}</p>{homeworkDialog.resubmissionDueAt && <p className="mt-2 text-xs font-bold text-[#82511f]">New deadline: {formatDueAt(homeworkDialog.resubmissionDueAt)}</p>}</div>}<div className="grid gap-4 py-1">{homeworkDialog?.questions.map((question, index) => <section key={question.id} className="rounded-2xl border bg-white p-4 sm:p-5"><div className={homeworkMode === "preview" ? "hidden" : "mb-4 flex items-start justify-between gap-4"}><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#77849a]">Question {index + 1}</p><h3 className="mt-1 text-base font-bold leading-6 text-[#1b2b4b]">{question.prompt}</h3></div><div className="flex shrink-0 flex-col items-end gap-1"><Badge variant="outline">{question.points} pts</Badge><span className="text-[11px] font-semibold text-[#7b8799]">{question.type === "code" ? `${question.language} code` : "Written answer"}</span></div></div>{homeworkMode === "preview" ? <ClassicQuestionEditor question={question} index={index} count={homeworkDialog.questions.length} onChange={(updatedQuestion) => updateDraftQuestions(homeworkDialog.questions.map((item) => item.id === question.id ? updatedQuestion : item))} onRemove={() => updateDraftQuestions(homeworkDialog.questions.filter((item) => item.id !== question.id))} onMove={(direction) => { const questions = [...homeworkDialog.questions]; const nextIndex = index + direction; if (nextIndex < 0 || nextIndex >= questions.length) return; [questions[index], questions[nextIndex]] = [questions[nextIndex], questions[index]]; updateDraftQuestions(questions); }} /> : <Textarea aria-label={`Answer for question ${index + 1}`} readOnly={homeworkMode === "view"} value={(answers[homeworkDialog.id] ?? homeworkDialog.submittedAnswers ?? {})[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [homeworkDialog.id]: { ...(current[homeworkDialog.id] ?? {}), [question.id]: event.target.value } }))} placeholder={question.type === "code" ? `Write ${question.language ?? "your"} code here...` : "Write your answer here..."} className={`${question.type === "code" ? "min-h-48 bg-[#101827] font-mono text-[14px] leading-6 text-[#d9e4f5] placeholder:text-[#7d8ba3]" : "min-h-32"} ${homeworkMode === "view" ? "cursor-default opacity-90" : ""}`} />}</section>)}{homeworkDialog && homeworkMode === "preview" && <Button variant="outline" onClick={() => updateDraftQuestions([...homeworkDialog.questions, { id: `q-${Date.now()}`, prompt: "", type: "text", points: 10 }])}><Plus />Add question</Button>}</div><DialogFooter><Button variant="outline" onClick={() => setHomeworkDialog(null)}>Close</Button>{homeworkMode === "edit" && <><Button variant="secondary" onClick={() => toast.success("Draft answers saved")}>Save draft</Button><Button onClick={submitHomework}><UploadCloud />Submit homework</Button></>}{homeworkMode === "preview" && <Button onClick={publishAssignment}><Check />Publish assignment</Button>}</DialogFooter></DialogContent></Dialog>
+    <Dialog open={Boolean(homeworkDialog)} onOpenChange={(open) => !open && setHomeworkDialog(null)}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><div className="flex flex-wrap items-center gap-2"><DialogTitle>{homeworkDialog?.title}</DialogTitle>{homeworkDialog && <Badge variant="outline" className="font-mono">{homeworkDialog.assignmentCode}</Badge>}{homeworkMode === "view" && <Badge variant="outline" className="border-[#d8dee8] bg-[#f3f5f8] text-[#5f6d82]"><ShieldCheck />Submitted · locked</Badge>}{homeworkMode === "preview" && <Badge className="bg-[#efeaff] text-[#6545bd]"><Sparkles />Professor preview</Badge>}</div><DialogDescription>{homeworkDialog?.course} · {homeworkDialog?.questions.length} questions · {homeworkDialog?.points} points · Due {homeworkDialog?.due}</DialogDescription></DialogHeader>{homeworkDialog && homeworkMode === "preview" && <div className="flex flex-wrap gap-2"><Badge variant="outline" className={homeworkDialog.aiEvaluationEnabled ? "border-[#bce7da] bg-[#eaf9f4] text-[#11765f]" : "border-[#eed3b2] bg-[#fff6e8] text-[#9a5b18]"}>{homeworkDialog.aiEvaluationEnabled ? "AI evaluation on" : "Manual grading"}</Badge><Badge variant="outline" className="border-[#d7def3] bg-[#f6f8ff] text-[#405481]">{homeworkDialog.plagiarismCheckEnabled ? `Plagrism limit ${homeworkDialog.plagiarismThreshold}%` : "Plagrism check off"}</Badge></div>}{homeworkDialog && homeworkMode === "preview" && hasOriginalDeadlinePassed(homeworkDialog) && <div className="flex items-start gap-3 rounded-xl border border-[#f1c4bf] bg-[#fff2f1] p-4 text-sm text-[#9f332e]"><Clock3 className="mt-0.5 size-4 shrink-0" /><div><p className="font-extrabold">Original deadline passed</p><p className="mt-1 leading-6">This assignment can no longer be published or expanded with additional questions.</p></div></div>}{homeworkMode === "view" && <div className="flex items-start gap-3 rounded-xl border border-[#d9e0eb] bg-[#f6f8fb] p-3 text-sm text-[#5d6b84]"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><p>This submitted attempt is read-only. Answers cannot be edited after submission.</p></div>}{homeworkDialog?.returnedForImprovement && homeworkMode === "edit" && <div className="rounded-xl border border-[#f0cda6] bg-[#fff8ed] p-4"><p className="font-extrabold text-[#925a12]">Professor returned this homework for improvement</p><p className="mt-1 text-sm leading-6 text-[#6f5a40]">{homeworkDialog.feedback}</p>{homeworkDialog.resubmissionDueAt && <p className="mt-2 text-xs font-bold text-[#82511f]">New deadline: {formatDueAt(homeworkDialog.resubmissionDueAt)}</p>}</div>}<div className="grid gap-4 py-1">{homeworkDialog?.questions.map((question, index) => <section key={question.id} className="rounded-2xl border bg-white p-4 sm:p-5"><div className={homeworkMode === "preview" ? "hidden" : "mb-4 flex items-start justify-between gap-4"}><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#77849a]">Question {index + 1}</p><h3 className="mt-1 text-base font-bold leading-6 text-[#1b2b4b]">{question.prompt}</h3></div><div className="flex shrink-0 flex-col items-end gap-1"><Badge variant="outline">{question.points} pts</Badge><span className="text-[11px] font-semibold text-[#7b8799]">{question.type === "code" ? `${question.language} code` : "Written answer"}</span></div></div>{homeworkMode === "preview" ? <ClassicQuestionEditor question={question} index={index} count={homeworkDialog.questions.length} onChange={(updatedQuestion) => updateDraftQuestions(homeworkDialog.questions.map((item) => item.id === question.id ? updatedQuestion : item))} onRemove={() => updateDraftQuestions(homeworkDialog.questions.filter((item) => item.id !== question.id))} onMove={(direction) => { const questions = [...homeworkDialog.questions]; const nextIndex = index + direction; if (nextIndex < 0 || nextIndex >= questions.length) return; [questions[index], questions[nextIndex]] = [questions[nextIndex], questions[index]]; updateDraftQuestions(questions); }} /> : <Textarea aria-label={`Answer for question ${index + 1}`} readOnly={homeworkMode === "view"} value={(answers[homeworkDialog.id] ?? homeworkDialog.submittedAnswers ?? {})[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [homeworkDialog.id]: { ...(current[homeworkDialog.id] ?? {}), [question.id]: event.target.value } }))} placeholder={question.type === "code" ? `Write ${question.language ?? "your"} code here...` : "Write your answer here..."} className={`${question.type === "code" ? "min-h-48 bg-[#101827] font-mono text-[14px] leading-6 text-[#d9e4f5] placeholder:text-[#7d8ba3]" : "min-h-32"} ${homeworkMode === "view" ? "cursor-default opacity-90" : ""}`} />}</section>)}{homeworkDialog && homeworkMode === "preview" && <Button variant="outline" disabled={hasOriginalDeadlinePassed(homeworkDialog)} title={hasOriginalDeadlinePassed(homeworkDialog) ? "Questions cannot be added after the original assignment deadline." : "Add another question"} onClick={() => updateDraftQuestions([...homeworkDialog.questions, { id: `q-${Date.now()}`, prompt: "", type: "text", points: 10 }])}>{hasOriginalDeadlinePassed(homeworkDialog) ? <><Clock3 />Add question locked</> : <><Plus />Add question</>}</Button>}</div><DialogFooter><Button variant="outline" onClick={() => setHomeworkDialog(null)}>Close</Button>{homeworkMode === "edit" && <><Button variant="secondary" onClick={() => toast.success("Draft answers saved")}>Save draft</Button><Button onClick={submitHomework}><UploadCloud />Submit homework</Button></>}{homeworkMode === "preview" && <Button disabled={!homeworkDialog || hasOriginalDeadlinePassed(homeworkDialog)} title={homeworkDialog && hasOriginalDeadlinePassed(homeworkDialog) ? "The original deadline has passed. This assignment can no longer be published." : "Publish assignment"} onClick={publishAssignment}>{homeworkDialog && hasOriginalDeadlinePassed(homeworkDialog) ? <><Clock3 />Deadline passed</> : <><Check />Publish assignment</>}</Button>}</DialogFooter></DialogContent></Dialog>
 
     <Dialog open={notificationDialog} onOpenChange={setNotificationDialog}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
@@ -1048,24 +1058,140 @@ export function CampusGradeClassic({ session, onLogout }: { session?: ApiSession
 }
 
 function ClassicQuestionEditor({ question, index, count, onChange, onRemove, onMove }: { question: Question; index: number; count: number; onChange: (question: Question) => void; onRemove: () => void; onMove: (direction: -1 | 1) => void }) {
-  return <section className="bg-white"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#77849a]">Question {index + 1}</p><p className="mt-1 text-xs text-[#69758a]">Edit the AI draft before publishing.</p></div><div className="flex gap-1"><Button size="icon-sm" variant="ghost" disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move question up"><ArrowUp /></Button><Button size="icon-sm" variant="ghost" disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Move question down"><ArrowDown /></Button><Button size="icon-sm" variant="ghost" className="text-[#c93832]" disabled={count === 1} onClick={onRemove} aria-label="Remove question"><Trash2 /></Button></div></div><Textarea className="mt-3 min-h-24" value={question.prompt} onChange={(event) => onChange({ ...question, prompt: event.target.value })} /><div className="mt-3 grid gap-3 sm:grid-cols-[1fr_150px]"><label className="grid gap-1 text-xs font-bold">Answer type<Select value={question.type} onValueChange={(value) => onChange({ ...question, type: value as "text" | "code", language: value === "code" ? question.language ?? "JavaScript" : undefined })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">Written answer</SelectItem><SelectItem value="code">Code answer</SelectItem></SelectContent></Select></label><label className="grid gap-1 text-xs font-bold">Maximum score<Input type="number" min="1" value={question.points} onChange={(event) => onChange({ ...question, points: Math.max(1, Number(event.target.value)) })} /></label></div></section>;
+  return <section className="bg-white"><div className="flex flex-wrap items-start justify-between gap-3"><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#77849a]">Question {index + 1}</p><div className="flex gap-1"><Button size="icon-sm" variant="ghost" disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move question up"><ArrowUp /></Button><Button size="icon-sm" variant="ghost" disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Move question down"><ArrowDown /></Button><Button size="icon-sm" variant="ghost" className="text-[#c93832]" disabled={count === 1} onClick={onRemove} aria-label="Remove question"><Trash2 /></Button></div></div><Textarea className="mt-3 min-h-24" value={question.prompt} onChange={(event) => onChange({ ...question, prompt: event.target.value })} /><div className="mt-3 grid gap-3 sm:grid-cols-[1fr_150px]"><label className="grid gap-1 text-xs font-bold">Answer type<Select value={question.type} onValueChange={(value) => onChange({ ...question, type: value as "text" | "code", language: value === "code" ? question.language ?? "JavaScript" : undefined })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">Written answer</SelectItem><SelectItem value="code">Code answer</SelectItem></SelectContent></Select></label><label className="grid gap-1 text-xs font-bold">Maximum score<Input type="number" min="1" value={question.points} onChange={(event) => onChange({ ...question, points: Math.max(1, Number(event.target.value)) })} /></label></div></section>;
 }
 
-function AdminAnalyticsClassic({ people, assignments }: { people: Person[]; assignments: Assignment[] }) {
+function AdminAnalyticsClassic({ people, assignments, courses }: { people: Person[]; assignments: Assignment[]; courses: ApiCourse[] }) {
   const [professorSearch, setProfessorSearch] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
   const [subjectSearch, setSubjectSearch] = useState("");
   const professors = people.filter((person) => person.role === "Professor" && `${person.name} ${person.campusId}`.toLowerCase().includes(professorSearch.toLowerCase()));
   const students = people.filter((person) => person.role === "Student" && `${person.name} ${person.campusId}`.toLowerCase().includes(studentSearch.toLowerCase()));
-  const subjects = courseOptions.filter((course) => course.toLowerCase().includes(subjectSearch.toLowerCase()));
-  return <div className="space-y-7"><SectionHeading eyebrow="Academic performance" title="Analytics" /><Tabs defaultValue="professors" className="space-y-5"><TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-xl bg-[#e8edf7] p-1 sm:w-fit sm:grid-cols-3"><TabsTrigger value="professors">Professor analytics</TabsTrigger><TabsTrigger value="students">Student analytics</TabsTrigger><TabsTrigger value="subjects">Subject analytics</TabsTrigger></TabsList><TabsContent value="professors" className="space-y-4"><div className="relative max-w-md"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" /><Input className="bg-white pl-9" value={professorSearch} onChange={(event) => setProfessorSearch(event.target.value)} placeholder="Search professors by name or ID" /></div>{professors.map((professor, index) => <article key={professor.id} className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)] sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-extrabold">{professor.name}</h2><Badge variant="outline" className="font-mono">{professor.campusId}</Badge></div><p className="mt-1 text-sm text-[#758197]">{professor.department} · {professor.courses?.length ?? 1} subjects</p></div><Badge className="bg-[#e8f7f1] text-[#16745e] hover:bg-[#e8f7f1]">Class average {index ? 82 : 87}%</Badge></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><CompactStatCard icon={ClipboardCheck} label="Assignments created" value={String(index ? 4 : assignments.length)} /><CompactStatCard icon={Users} label="Students taught" value={String(index ? 18 : people.filter((person) => person.role === "Student").length)} /><CompactStatCard icon={CheckCircle2} label="Submissions received" value={String(index ? 31 : assignments.reduce((sum, assignment) => sum + evaluationsFor(assignment).length, 0))} tone="green" /></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]"><div className="rounded-xl border p-4"><h3 className="font-extrabold">Average marks by subject</h3><div className="mt-4 grid gap-3">{(professor.courses ?? ["CS 412 · Web Engineering"]).map((course, courseIndex) => <div key={course}><div className="flex justify-between gap-3 text-sm font-bold"><span>{course}</span><span className="text-[#315fe3]">{Math.max(76, 88 - courseIndex * 4)}%</span></div><Progress value={Math.max(76, 88 - courseIndex * 4)} className="mt-2 h-2" /></div>)}</div></div><div className="rounded-xl border border-[#d9e2ff] bg-[#f5f7ff] p-4"><div className="flex items-center gap-2 text-[#315fe3]"><Bot className="size-5" /><h3 className="font-extrabold">What to improve</h3></div><p className="mt-3 text-sm leading-6 text-[#55627a]">Students lose the most points on asynchronous error handling and boundary cases. Add one targeted practice exercise before the next assignment.</p></div></div></article>)}</TabsContent><TabsContent value="students" className="space-y-4"><div className="relative max-w-md"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" /><Input className="bg-white pl-9" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search students by name or ID" /></div><section className="overflow-hidden rounded-2xl border bg-white"><Table><TableHeader><TableRow><TableHead>Student</TableHead><TableHead>Submitted</TableHead><TableHead>Average</TableHead><TableHead>Completion</TableHead><TableHead>Needs focus</TableHead></TableRow></TableHeader><TableBody>{students.map((student) => { const summary = getStudentGradeSummary(student, assignments); const completion = assignments.length ? Math.round((summary.submittedCount / assignments.length) * 100) : 0; return <TableRow key={student.id}><TableCell><p className="font-bold">{student.name}</p><p className="text-xs text-[#78849a]">{student.campusId} · {student.department}</p></TableCell><TableCell>{summary.submittedCount}/{assignments.length}</TableCell><TableCell className="font-extrabold text-[#315fe3]">{summary.average ?? "—"}{summary.average !== null ? "%" : ""}</TableCell><TableCell className="min-w-44"><Progress value={completion} className="h-2" /></TableCell><TableCell className="text-sm">Async error handling</TableCell></TableRow>; })}</TableBody></Table></section></TabsContent><TabsContent value="subjects" className="space-y-4"><div className="relative max-w-md"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" /><Input className="bg-white pl-9" value={subjectSearch} onChange={(event) => setSubjectSearch(event.target.value)} placeholder="Search subjects by name or ID" /></div><div className="grid gap-4 md:grid-cols-2">{subjects.map((subject, index) => <article key={subject} className="rounded-2xl border bg-white p-5"><Badge variant="outline">{subject.split(" · ")[0]}</Badge><h2 className="mt-4 text-lg font-extrabold">{subject.split(" · ")[1]}</h2><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-xs font-bold text-[#78849a]">Assignments</p><p className="mt-1 text-2xl font-extrabold">{Math.max(3, assignments.length - index)}</p></div><div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-xs font-bold text-[#78849a]">Average</p><p className="mt-1 text-2xl font-extrabold text-[#16866a]">{Math.max(78, 88 - index * 3)}%</p></div></div></article>)}</div></TabsContent></Tabs></div>;
+  const demoEnrollment = [32, 28, 41, 24];
+
+  const subjectRows = (courses.length
+    ? courses.map((course) => {
+        const label = `${course.code} · ${course.title}`;
+        const subjectAssignments = assignments.filter((assignment) => assignment.courseId === course._id || assignment.course === label);
+        const scores = subjectAssignments.flatMap((assignment) => evaluationsFor(assignment).map((evaluation) => evaluation.score));
+        return {
+          id: course._id,
+          code: course.code,
+          title: course.title,
+          professor: course.professor?.name ?? "Professor not assigned",
+          professorId: course.professor?.campusId ?? "—",
+          enrolledStudents: course.students?.length ?? 0,
+          assignments: subjectAssignments.length,
+          average: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null,
+        };
+      })
+    : courseOptions.map((course, index) => {
+        const [code, title] = course.split(" · ");
+        const professor = people.find((person) => person.role === "Professor" && person.courses?.includes(course));
+        const subjectAssignments = assignments.filter((assignment) => assignment.course === course);
+        const scores = subjectAssignments.flatMap((assignment) => evaluationsFor(assignment).map((evaluation) => evaluation.score));
+        return {
+          id: course,
+          code,
+          title,
+          professor: professor?.name ?? "Professor not assigned",
+          professorId: professor?.campusId ?? "—",
+          enrolledStudents: demoEnrollment[index],
+          assignments: subjectAssignments.length,
+          average: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : Math.max(78, 88 - index * 3),
+        };
+      }))
+    .filter((subject) => `${subject.code} ${subject.title} ${subject.professor} ${subject.professorId}`.toLowerCase().includes(subjectSearch.toLowerCase()));
+
+  return <div className="space-y-7">
+    <SectionHeading eyebrow="Academic performance" title="Analytics" />
+    <Tabs defaultValue="professors" className="space-y-5">
+      <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-xl bg-[#e8edf7] p-1 sm:w-fit sm:grid-cols-3">
+        <TabsTrigger value="professors">Professor analytics</TabsTrigger>
+        <TabsTrigger value="students">Student analytics</TabsTrigger>
+        <TabsTrigger value="subjects">Subject analytics</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="professors" className="space-y-4">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" />
+          <Input className="bg-white pl-9" value={professorSearch} onChange={(event) => setProfessorSearch(event.target.value)} placeholder="Search professors by name or ID" />
+        </div>
+        {professors.map((professor, index) => <article key={professor.id} className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)] sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-extrabold">{professor.name}</h2><Badge variant="outline" className="font-mono">{professor.campusId}</Badge></div>
+              <p className="mt-1 text-sm text-[#758197]">{professor.department} · {professor.courses?.length ?? 1} subjects</p>
+            </div>
+            <Badge className="bg-[#e8f7f1] text-[#16745e] hover:bg-[#e8f7f1]">Class average {index ? 82 : 87}%</Badge>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <CompactStatCard icon={ClipboardCheck} label="Assignments created" value={String(index ? 4 : assignments.length)} />
+            <CompactStatCard icon={Users} label="Students taught" value={String(index ? 18 : people.filter((person) => person.role === "Student").length)} />
+            <CompactStatCard icon={CheckCircle2} label="Submissions received" value={String(index ? 31 : assignments.reduce((sum, assignment) => sum + evaluationsFor(assignment).length, 0))} tone="green" />
+          </div>
+          <div className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
+            <div className="rounded-xl border p-4">
+              <h3 className="font-extrabold">Average marks by subject</h3>
+              <div className="mt-4 grid gap-3">{(professor.courses ?? ["CS 412 · Web Engineering"]).map((course, courseIndex) => <div key={course}><div className="flex justify-between gap-3 text-sm font-bold"><span>{course}</span><span className="text-[#315fe3]">{Math.max(76, 88 - courseIndex * 4)}%</span></div><Progress value={Math.max(76, 88 - courseIndex * 4)} className="mt-2 h-2" /></div>)}</div>
+            </div>
+            <div className="rounded-xl border border-[#d9e2ff] bg-[#f5f7ff] p-4">
+              <div className="flex items-center gap-2 text-[#315fe3]"><Bot className="size-5" /><h3 className="font-extrabold">What to improve</h3></div>
+              <p className="mt-3 text-sm leading-6 text-[#55627a]">Students lose the most points on asynchronous error handling and boundary cases. Add one targeted practice exercise before the next assignment.</p>
+            </div>
+          </div>
+        </article>)}
+      </TabsContent>
+
+      <TabsContent value="students" className="space-y-4">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" />
+          <Input className="bg-white pl-9" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search students by name or ID" />
+        </div>
+        <section className="overflow-hidden rounded-2xl border bg-white">
+          <Table>
+            <TableHeader><TableRow><TableHead>Student</TableHead><TableHead>Submitted</TableHead><TableHead>Average</TableHead><TableHead>Completion</TableHead><TableHead>Needs focus</TableHead></TableRow></TableHeader>
+            <TableBody>{students.map((student) => {
+              const summary = getStudentGradeSummary(student, assignments);
+              const completion = assignments.length ? Math.round((summary.submittedCount / assignments.length) * 100) : 0;
+              return <TableRow key={student.id}><TableCell><p className="font-bold">{student.name}</p><p className="text-xs text-[#78849a]">{student.campusId} · {student.department}</p></TableCell><TableCell>{summary.submittedCount}/{assignments.length}</TableCell><TableCell className="font-extrabold text-[#315fe3]">{summary.average ?? "—"}{summary.average !== null ? "%" : ""}</TableCell><TableCell className="min-w-44"><Progress value={completion} className="h-2" /></TableCell><TableCell className="text-sm">Async error handling</TableCell></TableRow>;
+            })}</TableBody>
+          </Table>
+        </section>
+      </TabsContent>
+
+      <TabsContent value="subjects" className="space-y-4">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8a96a8]" />
+          <Input className="bg-white pl-9" value={subjectSearch} onChange={(event) => setSubjectSearch(event.target.value)} placeholder="Search subjects by name, ID or professor" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {subjectRows.map((subject) => <article key={subject.id} className="rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)]">
+            <div className="flex items-start justify-between gap-3">
+              <div><Badge variant="outline">{subject.code}</Badge><h2 className="mt-3 text-lg font-extrabold">{subject.title}</h2></div>
+              {subject.average === null ? <Badge variant="outline">No scores</Badge> : <Badge className="bg-[#e8f7f1] text-[#16745e] hover:bg-[#e8f7f1]">{subject.average}% average</Badge>}
+            </div>
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#dce4f6] bg-[#f7f9ff] p-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#e9efff] text-[#2457e6]"><GraduationCap className="size-4" /></span>
+              <div><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#78849a]">Taught by</p><p className="text-sm font-extrabold text-[#1b2b4b]">{subject.professor} <span className="font-mono text-xs font-semibold text-[#6c7890]">· {subject.professorId}</span></p></div>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-[11px] font-bold text-[#78849a]">Assignments</p><p className="mt-1 text-xl font-extrabold">{subject.assignments}</p></div>
+              <div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-[11px] font-bold text-[#78849a]">Enrolled</p><p className="mt-1 text-xl font-extrabold text-[#315fe3]">{subject.enrolledStudents}</p></div>
+              <div className="rounded-xl bg-[#f6f8fc] p-3"><p className="text-[11px] font-bold text-[#78849a]">Average</p><p className="mt-1 text-xl font-extrabold text-[#16866a]">{subject.average === null ? "—" : `${subject.average}%`}</p></div>
+            </div>
+          </article>)}
+        </div>
+      </TabsContent>
+    </Tabs>
+  </div>;
 }
 
-function AdminPortal({ section, people, assignments, search, setSearch, openPerson, removePerson }: { section: string; people: Person[]; assignments: Assignment[]; search: string; setSearch: (value: string) => void; openPerson: (person?: Person) => void; removePerson: (person: Person) => void }) {
+function AdminPortal({ section, people, assignments, courses, search, setSearch, openPerson, removePerson }: { section: string; people: Person[]; assignments: Assignment[]; courses: ApiCourse[]; search: string; setSearch: (value: string) => void; openPerson: (person?: Person) => void; removePerson: (person: Person) => void }) {
   const [directoryTab, setDirectoryTab] = useState<"students" | "professors">("students");
   const directoryPeople = people.filter((person) => person.role === (directoryTab === "students" ? "Student" : "Professor") && `${person.name} ${person.email} ${person.campusId}`.toLowerCase().includes(search.toLowerCase()));
   const directoryTotal = people.filter((person) => person.role === (directoryTab === "students" ? "Student" : "Professor")).length;
-  if (section === "Analytics") return <AdminAnalyticsClassic people={people} assignments={assignments} />;
+  if (section === "Analytics") return <AdminAnalyticsClassic people={people} assignments={assignments} courses={courses} />;
   if (section === "Courses") return <div className="space-y-7"><SectionHeading eyebrow="Academic catalog" title="Courses" action={<Button><Plus />Add course</Button>} /><div className="grid gap-4 lg:grid-cols-3">{["CS 412 · Web Engineering", "CS 308 · Algorithms", "DS 220 · Data Analytics"].map((course, index) => <section key={course} className="rounded-2xl border bg-white p-5"><div className="flex items-center justify-between"><span className="grid size-10 place-items-center rounded-xl bg-[#e9efff] text-[#2457e6]"><BookOpen className="size-5" /></span><StatusBadge status="Active" /></div><h2 className="mt-5 text-lg font-extrabold">{course}</h2><p className="mt-2 text-sm text-[#69758a]">{[32, 28, 41][index]} students · {[5, 4, 6][index]} assignments</p><Button variant="outline" className="mt-5 w-full">Manage course <ChevronRight /></Button></section>)}</div></div>;
   return <div className="space-y-7">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-bold text-[#315fe3]">Wednesday, September 30</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em] text-[#10214a] sm:text-4xl">{section === "People" ? "Students & faculty" : "Campus operations at a glance"}</h1><p className="mt-2 text-base text-[#69758a]">Manage academic users, course access, and platform activity.</p></div><Button onClick={() => openPerson()}><UserRoundPlus />Add campus user</Button></div>
@@ -1106,7 +1232,37 @@ function StudentDetailsDialog({ student, assignments, onClose }: { student: Pers
 function ProfessorPortal({ section, people, assignments, openPerson, removePerson, openGenerator, preview, openAssignment, editDeadline, releaseAllScores }: { section: string; people: Person[]; assignments: Assignment[]; openPerson: (person?: Person) => void; removePerson: (person: Person) => void; openGenerator: () => void; preview: (assignment: Assignment) => void; openAssignment: (assignment: Assignment) => void; editDeadline: (assignment: Assignment) => void; releaseAllScores: (assignment?: Assignment) => void }) {
   const students = people.filter((person) => person.role === "Student" && person.course === "CS 412 · Web Engineering");
   const [selectedStudent, setSelectedStudent] = useState<Person | null>(null);
-  if (section === "Assignments") return <div className="space-y-7"><div className="flex flex-wrap items-end justify-between gap-3"><SectionHeading eyebrow="Coursework" title="Assignments & AI evaluations" /><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => releaseAllScores()}><CheckCircle2 />Submit all scores</Button><Button onClick={openGenerator} className="bg-[#6c4bc5] hover:bg-[#593ba9]"><Sparkles />Generate assignment</Button></div></div><div className="grid gap-4">{assignments.map((assignment) => { const submitted = evaluationsFor(assignment).length; return <article key={assignment.id} className="flex flex-col justify-between gap-4 rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)] sm:flex-row sm:items-center"><button className="flex min-w-0 flex-1 items-center gap-4 text-left" onClick={() => openAssignment(assignment)}><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#e9efff] text-[#2457e6]"><FileCode2 className="size-5" /></span><span><span className="flex flex-wrap items-center gap-2"><strong className="font-extrabold text-[#1b2b4b]">{assignment.title}</strong><Badge variant="outline" className="font-mono">{assignment.assignmentCode}</Badge></span><span className="mt-1 block text-xs font-semibold text-[#78849a]">{assignment.questions.length} questions · Due {assignment.due} · {submitted} of 32 submitted</span><span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${assignment.aiEvaluationEnabled ? "bg-[#eaf9f4] text-[#11765f]" : "bg-[#fff6e8] text-[#9a5b18]"}`}>{assignment.aiEvaluationEnabled ? `${submitted} automatically evaluated` : "Manual grading"}</span>{assignment.plagiarismCheckEnabled && <span className="ml-2 mt-2 inline-flex rounded-full bg-[#f3f6ff] px-2 py-1 text-[11px] font-bold text-[#405481]">Plagrism limit {assignment.plagiarismThreshold}%</span>}</span></button><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => editDeadline(assignment)}><CalendarClock />Edit deadline</Button><Button variant="outline" onClick={() => preview(assignment)}>Preview</Button><Button onClick={() => openAssignment(assignment)}>View submissions <ChevronRight /></Button></div></article>; })}</div></div>;
+  if (section === "Assignments") return <div className="space-y-7">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <SectionHeading eyebrow="Coursework" title="Assignments & AI evaluations" />
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => releaseAllScores()}><CheckCircle2 />Submit all scores</Button>
+        <Button onClick={openGenerator} className="bg-[#6c4bc5] hover:bg-[#593ba9]"><Sparkles />Generate assignment</Button>
+      </div>
+    </div>
+    <div className="grid gap-4">{assignments.map((assignment) => {
+      const submitted = evaluationsFor(assignment).length;
+      const deadlineLocked = hasOriginalDeadlinePassed(assignment);
+      return <article key={assignment.id} className="flex flex-col justify-between gap-4 rounded-2xl border bg-white p-5 shadow-[0_6px_24px_rgba(20,33,61,0.04)] sm:flex-row sm:items-center">
+        <button className="flex min-w-0 flex-1 items-center gap-4 text-left" onClick={() => openAssignment(assignment)}>
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#e9efff] text-[#2457e6]"><FileCode2 className="size-5" /></span>
+          <span>
+            <span className="flex flex-wrap items-center gap-2"><strong className="font-extrabold text-[#1b2b4b]">{assignment.title}</strong><Badge variant="outline" className="font-mono">{assignment.assignmentCode}</Badge></span>
+            <span className="mt-1 block text-xs font-semibold text-[#78849a]">{assignment.questions.length} questions · Due {assignment.due} · {submitted} of 32 submitted</span>
+            <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${assignment.aiEvaluationEnabled ? "bg-[#eaf9f4] text-[#11765f]" : "bg-[#fff6e8] text-[#9a5b18]"}`}>{assignment.aiEvaluationEnabled ? `${submitted} automatically evaluated` : "Manual grading"}</span>
+            {assignment.plagiarismCheckEnabled && <span className="ml-2 mt-2 inline-flex rounded-full bg-[#f3f6ff] px-2 py-1 text-[11px] font-bold text-[#405481]">Plagrism limit {assignment.plagiarismThreshold}%</span>}
+          </span>
+        </button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={deadlineLocked} title={deadlineLocked ? "The original assignment deadline has passed and can no longer be changed." : "Edit assignment deadline"} onClick={() => editDeadline(assignment)}>
+            {deadlineLocked ? <><Clock3 />Deadline passed</> : <><CalendarClock />Edit deadline</>}
+          </Button>
+          <Button variant="outline" onClick={() => preview(assignment)}>Preview</Button>
+          <Button onClick={() => openAssignment(assignment)}>View submissions <ChevronRight /></Button>
+        </div>
+      </article>;
+    })}</div>
+  </div>;
   if (section === "Class roster") return <><div className="space-y-7"><SectionHeading eyebrow="Class management" title="CS 412 roster" action={<Button onClick={() => openPerson()}><UserRoundPlus />Add student</Button>} /><StudentRosterTable students={students} assignments={assignments} onSelect={setSelectedStudent} onRemove={removePerson} showCourse /></div><StudentDetailsDialog student={selectedStudent} assignments={assignments} onClose={() => setSelectedStudent(null)} /></>;
   if (section === "Analytics") return <div className="space-y-7"><SectionHeading eyebrow="Class performance" title="Analytics" /><div className="grid gap-4 sm:grid-cols-3"><StatCard icon={TrendingUp} label="Class average" value="87.4%" note="+3.2% this month" tone="green" /><StatCard icon={ClipboardCheck} label="Submission rate" value="91%" note="Across 5 assignments" /><StatCard icon={ShieldCheck} label="Average similarity" value="8.3%" note="Below review threshold" tone="purple" /></div><section className="rounded-2xl border bg-white p-6"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#efeaff] text-[#7151c8]"><Bot className="size-5" /></span><div><h2 className="font-extrabold">AI learning insight</h2><p className="text-xs text-[#78849a]">Based on 23 recent submissions</p></div></div><p className="mt-5 max-w-3xl text-sm leading-6 text-[#5f6d82]">Students perform well on implementation but lose the most points on asynchronous error handling. A short targeted exercise before the next API assignment is recommended.</p></section></div>;
   return <div className="space-y-7">

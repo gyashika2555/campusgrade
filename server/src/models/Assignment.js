@@ -25,6 +25,7 @@ const assignmentSchema = new mongoose.Schema({
   questions: [questionSchema],
   totalPoints: { type: Number, required: true, default: 100 },
   dueAt: { type: Date, required: true },
+  originalDueAt: { type: Date, default: function originalDeadline() { return this.dueAt; } },
   status: { type: String, enum: ["draft", "published", "closed"], default: "draft" },
   aiGenerated: { type: Boolean, default: false },
   aiEvaluationEnabled: { type: Boolean, default: true },
