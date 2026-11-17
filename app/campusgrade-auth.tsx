@@ -5,7 +5,7 @@ import { GraduationCap, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { campusGradeApi, type ApiSession } from "@/lib/campusgrade-api";
-import { CampusGradeApp } from "./campusgrade-app";
+import { CampusGradeClassic } from "./campusgrade-classic";
 
 const SESSION_KEY = "campusgrade-session";
 
@@ -72,7 +72,7 @@ export function CampusGradeAuth() {
     setScreen("login");
   };
 
-  if (session) return <CampusGradeApp session={session} onLogout={logout} />;
+  if (session) return <CampusGradeClassic session={session} onLogout={logout} />;
 
   return <main className="grid min-h-screen place-items-center bg-[#f4f7fb] px-4 py-10 text-[#14213d]">
     <section className="w-full max-w-md overflow-hidden rounded-3xl border bg-white shadow-[0_22px_60px_rgba(16,33,74,0.13)]">
