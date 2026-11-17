@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  Activity, ArrowDown, ArrowUp, Bell, BookOpen, Bot, CalendarClock, Check, CheckCircle2, ChevronRight,
+  ArrowDown, ArrowUp, Bell, BookOpen, Bot, CalendarClock, Check, CheckCircle2, ChevronRight,
   CircleUserRound, ClipboardCheck, Clock3, FileCode2, GitBranch,
   GraduationCap, LayoutDashboard, Menu, Pencil, Plus,
   RefreshCw, RotateCcw, Search, Send, ShieldCheck, Sparkles, Trash2, TrendingUp,
@@ -267,7 +267,6 @@ const navByRole = {
   admin: [
     { label: "Overview", icon: LayoutDashboard }, { label: "People", icon: Users },
     { label: "Courses", icon: BookOpen }, { label: "Analytics", icon: TrendingUp },
-    { label: "System activity", icon: Activity },
   ],
   professor: [
     { label: "Overview", icon: LayoutDashboard }, { label: "Assignments", icon: ClipboardCheck },
@@ -1068,7 +1067,6 @@ function AdminPortal({ section, people, assignments, search, setSearch, openPers
   const directoryTotal = people.filter((person) => person.role === (directoryTab === "students" ? "Student" : "Professor")).length;
   if (section === "Analytics") return <AdminAnalyticsClassic people={people} assignments={assignments} />;
   if (section === "Courses") return <div className="space-y-7"><SectionHeading eyebrow="Academic catalog" title="Courses" action={<Button><Plus />Add course</Button>} /><div className="grid gap-4 lg:grid-cols-3">{["CS 412 · Web Engineering", "CS 308 · Algorithms", "DS 220 · Data Analytics"].map((course, index) => <section key={course} className="rounded-2xl border bg-white p-5"><div className="flex items-center justify-between"><span className="grid size-10 place-items-center rounded-xl bg-[#e9efff] text-[#2457e6]"><BookOpen className="size-5" /></span><StatusBadge status="Active" /></div><h2 className="mt-5 text-lg font-extrabold">{course}</h2><p className="mt-2 text-sm text-[#69758a]">{[32, 28, 41][index]} students · {[5, 4, 6][index]} assignments</p><Button variant="outline" className="mt-5 w-full">Manage course <ChevronRight /></Button></section>)}</div></div>;
-  if (section === "System activity") return <div className="space-y-7"><SectionHeading eyebrow="Audit log" title="System activity" /><section className="rounded-2xl border bg-white p-5 sm:p-6"><div className="grid gap-3">{[["AI evaluation completed", "Maya Chen · REST API with Authentication", "2 min ago"], ["Faculty account updated", "Dr. Aisha Patel · Computer Science", "18 min ago"], ["Course roster imported", "CS 308 · 28 students", "1 hr ago"], ["Assignment published", "Graph Traversal Visualizer", "Yesterday"]].map(([title, detail, time]) => <div key={`${title}-${time}`} className="flex items-start gap-3 rounded-xl border p-4"><span className="mt-1 size-2 rounded-full bg-[#315fe3]" /><div className="flex-1"><p className="font-bold">{title}</p><p className="mt-1 text-sm text-[#69758a]">{detail}</p></div><span className="text-xs font-semibold text-[#8a96a8]">{time}</span></div>)}</div></section></div>;
   return <div className="space-y-7">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-bold text-[#315fe3]">Wednesday, September 30</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.04em] text-[#10214a] sm:text-4xl">{section === "People" ? "Students & faculty" : "Campus operations at a glance"}</h1><p className="mt-2 text-base text-[#69758a]">Manage academic users, course access, and platform activity.</p></div><Button onClick={() => openPerson()}><UserRoundPlus />Add campus user</Button></div>
     {section === "Overview" && <div className="grid max-w-4xl gap-3 sm:grid-cols-3"><CompactStatCard icon={Users} label="Active users" value="1,284" /><CompactStatCard icon={GraduationCap} label="Faculty" value="86" tone="green" /><CompactStatCard icon={BookOpen} label="Active courses" value="64" tone="purple" /></div>}
